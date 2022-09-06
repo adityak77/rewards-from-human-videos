@@ -34,7 +34,7 @@ pip install -e .
 
 For details as to what the commands do/what the arguments are, refer to [the original repo](https://github.com/anniesch/dvd/blob/main/README.md).
 
-- We can currently reproduce the training command as follows:
+- We can currently reproduce the training command as follows (you might need to use a different version of Pillow - see troubleshooting section below):
 
 ```
 cd dvd
