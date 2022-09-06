@@ -116,9 +116,9 @@ def conv_lstm_2d(inputs, state, output_channels,
   else:
     input_shape = spatial_dims + [input_channels]
 
-  cell = tensorflow.keras.layers.ConvLSTM2D(output_channels, [kernel_size, kernel_size])
-  # cell = contrib.rnn().ConvLSTMCell(
-  #     2, input_shape, output_channels, [kernel_size, kernel_size], name=name)
+  # cell = tensorflow.keras.layers.ConvLSTM2D(output_channels, [kernel_size, kernel_size])
+  cell = contrib.rnn().ConvLSTMCell(
+      2, input_shape, output_channels, [kernel_size, kernel_size], name=name)
   if state is None:
     state = cell.zero_state(batch_size, tf.float32)
   outputs, new_state = cell(inputs, state)
