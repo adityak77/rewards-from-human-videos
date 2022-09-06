@@ -1,0 +1,43 @@
+{
+  "resume": 0,
+  "gpus": "0",
+  "use_cuda": true,
+  "num_tasks": 6,
+  "human_data_dir": "../smthsmth/sm/20bn-something-something-v2",
+  "sim_dir": "demos/",
+  "root": "./",
+  "log_dir": "test/",
+  "log_freq": 1,
+  "seed": 0,
+  "im_size": 120,
+  "num_epochs": 150,
+  "hidden_size": 512,
+  "batch_size": 24,
+  "traj_length": 0,
+  "add_demos": 60,
+  "lr": 0.01,
+  "pretrained": true,
+  "pretrained_dir": "pretrained/video_encoder/",
+  "just_robot": false,
+  "robot_tasks": [
+    5,
+    41,
+    93
+  ],
+  "human_tasks": [
+    5,
+    41,
+    44,
+    46,
+    93,
+    94
+  ],
+  "similarity": true,
+  "demo_batch_val": 0.5,
+  "action_dim": 5,
+  "im_size_x": 180,
+  "json_data_train": "./something-something-v2-train.json",
+  "json_data_val": "./something-something-v2-validation.json",
+  "json_data_test": "./something-something-v2-test.json",
+  "json_file_labels": "./something-something-v2-labels.json"
+}
