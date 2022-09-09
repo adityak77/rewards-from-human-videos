@@ -34,11 +34,11 @@ pip install -e .
 
 For details as to what the commands do/what the arguments are, refer to [the original repo](https://github.com/anniesch/dvd/blob/main/README.md).
 
-- We can currently reproduce the training command as follows:
+- We can currently reproduce the training command as follows (you might need to use a different version of Pillow - see troubleshooting section below):
 
 ```
 cd dvd
-python train.py --num_tasks 6 --traj_length 0 --log_dir "test/" --similarity --batch_size 24 --im_size 120 --seed 0 --lr 0.01 --pretrained --human_data_dir ../smthsmth/sm/20bn-something-something-v2 --sim_dir demos/ --human_tasks 5 41 44 46 93 94 --robot_tasks 5 41 93 --add_demos 60 --gpus 0
+python train.py --num_tasks 6 --traj_length 0 --log_dir path/to/train/model/output --similarity --batch_size 24 --im_size 120 --seed 0 --lr 0.01 --pretrained --human_data_dir path/to/smthsmth/sm/20bn-something-something-v2 --sim_dir demos/ --human_tasks 5 41 44 46 93 94 --robot_tasks 5 41 93 --add_demos 60 --gpus 0
 ```
 
 - We can currently collect robot demos as follows:
@@ -57,7 +57,7 @@ OUTPUT = sv2p_output
 
 cd dvd
 
-tensor2tensor/tensor2tensor/bin/t2t-trainer --t2t_usr_dir=~/rewards-from-human-videos/dvd/human_updated \
+tensor2tensor/tensor2tensor/bin/t2t-trainer --t2t_usr_dir=human_updated \
 --schedule=train --alsologtostderr --generate_data --tmp_dir "tmp/" --data_dir=$DATA_DIR --output_dir=$OUTPUT \
 --problem=human_updated --model=next_frame_sv2p --hparams_set=next_frame_sv2p --train_steps=200000 --eval_steps=100 \
 --hparams="video_num_input_frames=1, video_num_target_frames=15, batch_size=2"
@@ -69,7 +69,7 @@ This command currently does not work. There are many version issues that require
 cd dvd
 python sv2p_plan.py --num_epochs 100 --num_tasks 6 --task_num 94 --seed 0 --sample_sz 100 --similarity 1 \
 --num_demos 3 --model_dir pretrained/dvd_human_tasks_6_robot_tasks_3.pth.tar --xml env1 --cem_iters 0 --root ./ \
---sv2p_root ../tensor2tensor/tensor2tensor/
+--sv2p_root path/to/tensor2tensor/
 ```
 
 
