@@ -91,9 +91,10 @@ def get_human_demos(args):
         This will give a demo consisting of 3 trajectories each of length args.traj_length,
         which subsequently move the robot arm to each of the goal positions. 
         '''
-        goals = [[-0.17, 0.55, 0], [-0, 0.6, 0], [0.1, 0.6, 0]] # correct
+        # goals = [[-0.17, 0.55, 0], [-0, 0.6, 0], [0.1, 0.6, 0]] # correct right to left
         # goals = [[0.2, 0.55, 0], [0.2, 0.75, 0], [0.2, 0.55, 0]] # incorrect
-        # goals = [[-0.17, 0.55, 0], [-0, 0.6, 0], [0, 0.6, 0]] # partial
+        # goals = [[-0.17, 0.55, 0], [-0.17, 0.55, 0], [-0.17, 0.55, 0]] # partial
+        goals = [[0.17, 0.55, 0], [0, 0.6, 0], [-0.1, 0.6, 0]] # left to right
         for i in range(args.num_traj_per_epoch):
             if args.random:
                 imgs, actions, obs = take_random_trajectory(args, env, obs)
