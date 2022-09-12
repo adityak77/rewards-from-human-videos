@@ -80,7 +80,7 @@ def main():
             checkpoint_path = os.path.join(args.pretrained_dir, "model_best.pth.tar")
         else:
             checkpoint_path = os.path.join(args.log_dir, 'model',
-                                   str(args.resume) + 'checkpoint.pth.tar')
+                                   str(args.resume) + 'sim_checkpoint.pth.tar')
         if os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path)
             if args.pretrained:
