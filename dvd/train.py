@@ -80,7 +80,7 @@ def main():
             checkpoint_path = os.path.join(args.pretrained_dir, "model_best.pth.tar")
         else:
             checkpoint_path = os.path.join(args.log_dir, 'model',
-                                   str(args.resume) + 'sim_checkpoint.pth.tar')
+                                   str(args.resume) + 'checkpoint.pth.tar')
         if os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path)
             if args.pretrained:
@@ -112,6 +112,9 @@ def main():
         
     if args.similarity:
         sim_discriminator = SimilarityDiscriminator(args).to(device)
+        if args.sim_resume:
+            resume_path = os.path.join(args.log_dir, 'model', str(args.sim_resume) + 'sim_discriminator.pth.tar')
+            sim_discriminator.load_state_dict(torch.load(resume_path), strict=True)
     if args.pretrained:
         for p in model.parameters():
             p.requires_grad = False
@@ -223,7 +226,7 @@ def main():
 
     print(" > Training is getting started...")
     print(" > Training takes {} epochs.".format(args.num_epochs))
-    start_epoch = args.resume if args.resume > 0 else 0
+    start_epoch = args.sim_resume if args.sim_resume > 0 else 0
     
     report_losses = {}
     report_losses['train_acc'] = []

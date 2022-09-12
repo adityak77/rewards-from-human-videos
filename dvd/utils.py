@@ -18,6 +18,7 @@ import imageio
 def load_args():
     parser = argparse.ArgumentParser(description='DVD example training')
     parser.add_argument('--resume', '-r', type=int, default=0, help="resume training from a given checkpoint.")
+    parser.add_argument('--sim_resume', type=int, default=0, help="resume sim discriminator training from a given checkpoint.")
     parser.add_argument('--gpus', '-g', default = str(0), help="GPU ids to use. Please enter a comma separated list")
     parser.add_argument('--use_cuda', default=True, help="to use GPUs")
     parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks')
