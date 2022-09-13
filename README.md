@@ -47,6 +47,14 @@ python train.py --num_tasks 6 --traj_length 0 --log_dir path/to/train/model/outp
 python collect_data.py --xml env1 --task_num 94
 ```
 
+## Testing learned reward function
+
+Using `collect_data` script above, we can generate sample trajectories in the `env` directory. We can evaluate the rewards for each of these trajectories against a demo video and get the average reward.
+
+```
+python reward_inference.py --eval_path data/file/from/collect_data/script --demo_path path/to/demo
+```
+
 ## TODO
 
 In order to run inference using DVD, we need to use Stochastic Variational Video Predictor (SV2P) from `tensor2tensor`. In order to do this, you need to register the problem `dvd/human_problem.py` first. To do this, run something like 
