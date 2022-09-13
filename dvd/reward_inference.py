@@ -109,9 +109,9 @@ def prepare_results(args):
 
 
 if __name__ == '__main__':
-    random.seed(0)
-    np.random.seed(0)
-    torch.manual_seed(0)
+    # random.seed(0)
+    # np.random.seed(0)
+    # torch.manual_seed(0)
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval_path", type=str, required=True, help='path to directory of test videos')
     parser.add_argument("--demo_path", type=str, default='data_correct/demo_sample0.gif', help='path to demo video')
