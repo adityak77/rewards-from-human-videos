@@ -45,7 +45,9 @@ class Dreamer(nn.Module):
         if conf.probe_model == 'map':
             probe_model = MapProbeHead(state_dim + 4, conf)
         elif conf.probe_model == 'goals':
-            probe_model = GoalsProbe(state_dim, conf)
+            probe_model = GoalsProbe(features_dim, conf)
+        elif conf.probe_model == 'map+goals':
+            probe_model = MapGoalsProbe(features_dim, conf)
         elif conf.probe_model == 'none':
             probe_model = NoProbeHead()
         else:
