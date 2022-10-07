@@ -1,6 +1,6 @@
-
-dvd/data
-dvd/data_dir
+dvd/data*
+dvd/test/*
+dvd/tmp
 
 smthsmth/
 sv2p_output/
