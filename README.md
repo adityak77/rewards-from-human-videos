@@ -17,7 +17,7 @@ conda env create -f conda_env_setup.yml
 conda activate dvd_t2t
 ```
 
-- Add references to modified versions of `Metaworld` and `tensor2tensor` and `dvd/sim_envs`
+- Add references to modified versions of `Metaworld`, `tensor2tensor`, `dvd/sim_envs`, `pytorch_mmpi`.
 
 ```
 cd metaworld
@@ -27,6 +27,9 @@ cd tensor2tensor
 pip install -e .
 
 cd dvd/sim_envs
+pip install -e .
+
+cd pytorch_mppi
 pip install -e .
 ```
 
