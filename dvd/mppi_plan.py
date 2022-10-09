@@ -88,11 +88,12 @@ def load_encoder_model():
 
 def inference(states, demo, model, sim_discriminator):
     """
-    :param states: (T x nx) Tensor
+    :param states: (K x T x nx) Tensor
         T = trajectory size, nx = state embedding size 
-    :param demo: (T x nx) Tensor
+    :param demo: (T x H x W x C) Tensor
     """
-    states = torch.reshape(states, (states.shape[0], 120, 180, 3))
+    # import ipdb; ipdb.set_trace()
+    states = torch.reshape(states.squeeze(), (states.shape[1], states.shape[2], 120, 180, 3))
     states = (states.numpy() * 255).astype(np.uint8)
 
     transform = ComposeMix([
@@ -109,28 +110,40 @@ def inference(states, demo, model, sim_discriminator):
     sim_discriminator.eval()
 
     # process states
-    def process_video(sample):
-        sample_downsample = sample[1::max(1, len(sample) // 30)][:30]
-        sample_downsample = [elem for elem in sample_downsample] # need to convert to list to make PIL image conversion
+    def process_video(samples):
+        """
+        :param samples: (K x T x H x W x C) Tensor
+            to prepare before encoding by networks
+        """
+        K, T, H, W, C = tuple(samples.shape)
 
-        sample_transform = torch.stack(transform(sample_downsample)).permute(1, 0, 2, 3).unsqueeze(0)
+        samples = torch.transpose(samples, 0, 1) # shape T x K x H x W x C
+        sample_downsample = samples[1::max(1, len(samples) // 30)][:30]
+        sample_downsample = torch.transpose(sample_downsample, 0, 1) # shape T x K x H x W x C
+        # Flatten as (K x T) x H x W x C
+        sample_flattened = torch.reshape(sample_downsample, (-1, H, W, C))
+        
+        sample_flattened = [elem for elem in sample_flattened] # need to convert to list to make PIL image conversion
+
+        # sample_transform should be K x 30 x T x 120 x 120 after cropping and trajectory downsampling
+        sample_transform = torch.stack(transform(sample_flattened))
+        sample_transform = sample_transform.reshape(K, 30, C, 120, 120).permute(0, 2, 1, 3, 4)
         sample_data = [sample_transform.to(device)]
 
         return sample_data
     
-    demo_data = process_video(demo)
-    states_data = process_video(states)
+    demo_data = process_video(demo.unsqueeze(0))
+    states_data = process_video(torch.Tensor(states))
 
     # evaluate trajectory reward
     with torch.no_grad():
-        states_enc = model.encode(states_data)
-        demo_enc = model.encode(demo_data)
+        states_enc = model.encode(states_data) # K x 512
+        demo_enc = model.encode(demo_data) # 1 x 512
 
-        input_demo = F.softmax(sim_discriminator.forward(states_enc, demo_enc), dim=1)
+        logits = sim_discriminator.forward(states_enc, demo_enc.repeat(states_enc.shape[0], 1))
+        reward_samples = F.softmax(logits, dim=1)
 
-    reward_sample = input_demo[:, 1].item()
-
-    return reward_sample
+    return reward_samples[:, 1].unsqueeze(0)
 
 
 """     Inputs for MPPI      """
@@ -153,13 +166,10 @@ def terminal_state_cost(states, actions):
 
     :returns costs: (K x 1) Tensor
     """
-    video_encoder = load_encoder_model()
-    sim_discriminator = load_discriminator_model()
-    demo = decode_gif(args.demo_path)
-
-    rewards = torch.zeros(states.shape[1])
-    for i in range(states.shape[1]):
-        rewards[i] = inference(states[0, i], demo, video_encoder, sim_discriminator)
+    command_start = time.perf_counter()
+    rewards = inference(states, demo, video_encoder, sim_discriminator)
+    elapsed = time.perf_counter() - command_start
+    print(f"Video similarity inference elapsed time: {elapsed:.4f}s")
 
     return -rewards
 
@@ -182,9 +192,14 @@ if __name__ == '__main__':
                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
     env.reset_model()
 
-    # state space is image and need you translate back and forth from that
-    nx = 64800 # size of the image 
+    video_encoder = load_encoder_model()
+    sim_discriminator = load_discriminator_model()
+    demo = torch.Tensor(decode_gif(args.demo_path))
+
+    # state space is image and need to translate back and forth from that
+    nx = 64800 # size of the image 120 x 180 x 3
     mppi_gym = mppi.MPPI(dynamics, running_cost, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
                          terminal_state_cost=terminal_state_cost, lambda_=lambda_)
-    total_reward = mppi.run_mppi_metaworld(mppi_gym, env, train, render=False)
-    logger.info("Total reward %f", total_reward[0])
+    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_gym, env, train, args.task_id, iter=100, render=False)
+    # logger.info("Total reward %f", total_reward)
+    logger.info(f"Fraction successful episodes: {total_successes / total_episodes}")

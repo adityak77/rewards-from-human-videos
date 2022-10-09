@@ -235,10 +235,10 @@ class MPPI():
         for t in range(T):
             u = self.u_scale * perturbed_actions[:, t].repeat(self.M, 1, 1)
             state = self._dynamics(state, u, t)
-            # c = self._running_cost(state, u).to(self.dtype)
-            # cost_samples += c
-            # if self.M > 1:
-            #     cost_var += c.var(dim=0) * (self.rollout_var_discount ** t)
+            c = self._running_cost(state, u).to(self.dtype)
+            cost_samples += c
+            if self.M > 1:
+                cost_var += c.var(dim=0) * (self.rollout_var_discount ** t)
 
             # Save total states/actions
             states.append(state)
@@ -252,7 +252,7 @@ class MPPI():
         # action perturbation cost
         if self.terminal_state_cost:
             c = self.terminal_state_cost(states, actions)
-            cost_samples += c.to(self.dtype)
+            cost_samples += c.to(self.dtype).to(cost_samples.device)
         cost_total += cost_samples.mean(dim=0)
         cost_total += cost_var * self.rollout_var_cost
         return cost_total, states, actions
@@ -342,9 +342,41 @@ def run_mppi(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=1000, rend
         dataset[di, mppi.nx:] = action
     return total_reward, dataset
 
-def run_mppi_metaworld(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=1000, render=True):
+def tabletop_obs(info):
+    hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
+    mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
+    mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
+    init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
+    return init_low_dim
+
+def evaluate_episode(low_dim_state, very_start, task_num):
+    right_to_left = low_dim_state[3:4] - very_start[3:4]
+    left_to_right = -low_dim_state[3:4] + very_start[3:4]
+    forward = low_dim_state[4:5] - very_start[4:5]
+    drawer_move = np.abs(low_dim_state[10] - very_start[10])
+    drawer_open = np.abs(low_dim_state[10])
+    move_faucet = low_dim_state[12]
+
+    if task_num == 5: # close drawer
+        criteria = drawer_open < 0.01 and np.abs(right_to_left) < 0.01
+    elif task_num == 94: # move cup right to left
+        criteria = left_to_right < -0.05 and drawer_move < 0.03 and move_faucet < 0.01
+    elif task_num == 45: # Push cup forward
+        criteria = abs(right_to_left) < 0.04 and forward > 0.1
+    else:
+        print("No criteria set")
+        assert(False)
+
+    return criteria
+
+def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter=50, iter=1000, render=True):
     dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
     total_reward = 0
+
+    total_successes = 0
+    total_episodes = 0
+    _, env_info = env.reset_model()
+    very_start = tabletop_obs(env_info)
     for i in range(iter):
         state = env.get_obs().flatten()
 
@@ -353,12 +385,24 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=
         elapsed = time.perf_counter() - command_start
 
         s, r, done, _ = env.step(action.cpu().numpy())
-        if done:
-            print('episode done')
         total_reward += r
-        logger.debug(f"action taken: {action} cost received: {-r:.4f} time taken: {elapsed:.5f}s")
+        # logger.debug(f"action taken: {action} cost received: {-r:.4f} time taken: {elapsed:.5f}s")
+        logger.debug(f"action taken: {action} time taken: {elapsed:.5f}s")
         if render:
             env.render()
+
+        if done:
+            low_dim_info = env._get_low_dim_info()
+            low_dim_state = tabletop_obs(low_dim_info)
+            succ = evaluate_episode(low_dim_state, very_start, task_num)
+
+            result = 'SUCCESS' if succ else 'FAILURE'
+            total_successes += succ
+            total_episodes += 1
+            print(f'----------Episode done: {result}----------')
+            
+            _, start_info = env.reset_model()
+            very_start = tabletop_obs(start_info)
 
         di = i % retrain_after_iter
         if di == 0 and i > 0:
@@ -367,4 +411,5 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=
             dataset.zero_()
         dataset[di, :mppi.nx] = torch.tensor(state, dtype=mppi.U.dtype)
         dataset[di, mppi.nx:] = action
-    return total_reward, dataset
+
+    return total_reward, total_successes, total_episodes, dataset
