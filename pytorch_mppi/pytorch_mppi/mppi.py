@@ -367,7 +367,7 @@ def evaluate_episode(low_dim_state, very_start, task_num):
         print("No criteria set")
         assert(False)
 
-    return criteria
+    return criteria[0]
 
 def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter=50, iter=1000, render=True):
     dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
@@ -400,6 +400,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter
             total_successes += succ
             total_episodes += 1
             print(f'----------Episode done: {result}----------')
+            print(f'----------Currently at {total_successes} / {total_episodes}----------')
             
             _, start_info = env.reset_model()
             very_start = tabletop_obs(start_info)

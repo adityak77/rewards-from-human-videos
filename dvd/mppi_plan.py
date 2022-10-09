@@ -178,7 +178,8 @@ def train(new_data):
 
 if __name__ == '__main__':
     TIMESTEPS = 50 # T = env.max_path_length
-    N_SAMPLES = 50  # K
+    N_SAMPLES = 10  # K
+    NUM_ITERS = 1000
 
     d = device
     dtype = torch.double
@@ -200,6 +201,6 @@ if __name__ == '__main__':
     nx = 64800 # size of the image 120 x 180 x 3
     mppi_gym = mppi.MPPI(dynamics, running_cost, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
                          terminal_state_cost=terminal_state_cost, lambda_=lambda_)
-    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_gym, env, train, args.task_id, iter=100, render=False)
+    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_gym, env, train, args.task_id, iter=NUM_ITERS, render=False)
     # logger.info("Total reward %f", total_reward)
-    logger.info(f"Fraction successful episodes: {total_successes / total_episodes}")
+    logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes}")
