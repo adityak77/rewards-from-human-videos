@@ -92,6 +92,9 @@ def inference(states, demo, model, sim_discriminator):
         T = trajectory size, nx = state embedding size 
     :param demo: (T x nx) Tensor
     """
+    states = torch.reshape(states, (states.shape[0], 120, 180, 3))
+    states = (states.numpy() * 255).astype(np.uint8)
+
     transform = ComposeMix([
         [Scale(args.im_size), "img"],
         [torchvision.transforms.ToPILImage(), "img"],
@@ -115,8 +118,8 @@ def inference(states, demo, model, sim_discriminator):
 
         return sample_data
     
-    states_data = process_video(states)
     demo_data = process_video(demo)
+    states_data = process_video(states)
 
     # evaluate trajectory reward
     with torch.no_grad():
@@ -134,7 +137,7 @@ def inference(states, demo, model, sim_discriminator):
 def dynamics(state, action):
     """
     unknown dynamics
-    not sure if this will work
+    might be very inefficient
     """
     return state
 
@@ -154,25 +157,23 @@ def terminal_state_cost(states, actions):
     sim_discriminator = load_discriminator_model()
     demo = decode_gif(args.demo_path)
 
-    costs = torch.zeros(states.shape[0])
-    for i in range(states.shape[0]):
-        costs[i] = inference(states[i], demo, video_encoder, sim_discriminator)
+    rewards = torch.zeros(states.shape[1])
+    for i in range(states.shape[1]):
+        rewards[i] = inference(states[0, i], demo, video_encoder, sim_discriminator)
 
-    return costs
+    return -rewards
 
 def train(new_data):
     pass
 
 if __name__ == '__main__':
-    TIMESTEPS = 60  # T
-    N_SAMPLES = 200  # K
+    TIMESTEPS = 50 # T = env.max_path_length
+    N_SAMPLES = 50  # K
 
     d = device
     dtype = torch.double
 
     noise_sigma = 10 * torch.eye(4, dtype=dtype, device=d) 
-    # noise_sigma = torch.tensor(10, device=d, dtype=dtype)
-    # noise_sigma = torch.tensor([[10, 0], [0, 10]], device=d, dtype=dtype)
     lambda_ = 1.
 
     env = Tabletop(log_freq=args.env_log_freq, 
@@ -181,9 +182,9 @@ if __name__ == '__main__':
                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
     env.reset_model()
 
-    # TODO: state space is image and need you translate back and forth from that
-    nx = 7 # 1024 # idk for now
+    # state space is image and need you translate back and forth from that
+    nx = 64800 # size of the image 
     mppi_gym = mppi.MPPI(dynamics, running_cost, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
                          terminal_state_cost=terminal_state_cost, lambda_=lambda_)
-    total_reward = mppi.run_mppi(mppi_gym, env, train, render=True)
+    total_reward = mppi.run_mppi_metaworld(mppi_gym, env, train, render=False)
     logger.info("Total reward %f", total_reward[0])

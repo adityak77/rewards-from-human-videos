@@ -46,6 +46,9 @@ if __name__ == "__main__":
 
         state = torch.cat((newth, newthdot), dim=1)
         return state
+    
+    def no_dynamics(state, perturbed_action):
+        return state
 
 
     def angle_normalize(x):

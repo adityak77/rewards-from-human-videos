@@ -1,3 +1,4 @@
+import os
 import torch
 import time
 import logging
@@ -234,10 +235,10 @@ class MPPI():
         for t in range(T):
             u = self.u_scale * perturbed_actions[:, t].repeat(self.M, 1, 1)
             state = self._dynamics(state, u, t)
-            c = self._running_cost(state, u).to(self.dtype)
-            cost_samples += c
-            if self.M > 1:
-                cost_var += c.var(dim=0) * (self.rollout_var_discount ** t)
+            # c = self._running_cost(state, u).to(self.dtype)
+            # cost_samples += c
+            # if self.M > 1:
+            #     cost_var += c.var(dim=0) * (self.rollout_var_discount ** t)
 
             # Save total states/actions
             states.append(state)
@@ -251,7 +252,7 @@ class MPPI():
         # action perturbation cost
         if self.terminal_state_cost:
             c = self.terminal_state_cost(states, actions)
-            cost_samples += c
+            cost_samples += c.to(self.dtype)
         cost_total += cost_samples.mean(dim=0)
         cost_total += cost_var * self.rollout_var_cost
         return cost_total, states, actions
@@ -320,15 +321,40 @@ def run_mppi(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=1000, rend
     dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
     total_reward = 0
     for i in range(iter):
-        # import ipdb; ipdb.set_trace()
-        state = env.get_env_state()[1]
-        state = np.hstack((state[0][0], state[1][0]))
-        # state = env.state.copy()
+        state = env.state.copy()
+
         command_start = time.perf_counter()
         action = mppi.command(state)
         elapsed = time.perf_counter() - command_start
-        # import ipdb; ipdb.set_trace()
+
         s, r, _, _ = env.step(action.cpu().numpy())
+        total_reward += r
+        logger.debug(f"action taken: {action} cost received: {-r:.4f} time taken: {elapsed:.5f}s")
+        if render:
+            env.render()
+
+        di = i % retrain_after_iter
+        if di == 0 and i > 0:
+            retrain_dynamics(dataset)
+            # don't have to clear dataset since it'll be overridden, but useful for debugging
+            dataset.zero_()
+        dataset[di, :mppi.nx] = torch.tensor(state, dtype=mppi.U.dtype)
+        dataset[di, mppi.nx:] = action
+    return total_reward, dataset
+
+def run_mppi_metaworld(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=1000, render=True):
+    dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
+    total_reward = 0
+    for i in range(iter):
+        state = env.get_obs().flatten()
+
+        command_start = time.perf_counter()
+        action = mppi.command(state)
+        elapsed = time.perf_counter() - command_start
+
+        s, r, done, _ = env.step(action.cpu().numpy())
+        if done:
+            print('episode done')
         total_reward += r
         logger.debug(f"action taken: {action} cost received: {-r:.4f} time taken: {elapsed:.5f}s")
         if render:
