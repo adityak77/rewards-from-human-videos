@@ -367,18 +367,22 @@ def evaluate_episode(low_dim_state, very_start, task_num):
         print("No criteria set")
         assert(False)
 
-    return criteria[0]
+    return criteria
 
-def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter=50, iter=1000, render=True):
+def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter=50, iter=1000, use_gt=False, render=True):
     dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
     total_reward = 0
 
     total_successes = 0
     total_episodes = 0
-    _, env_info = env.reset_model()
-    very_start = tabletop_obs(env_info)
+    _, start_info = env.reset_model()
+    very_start = tabletop_obs(start_info)
     for i in range(iter):
-        state = env.get_obs().flatten()
+        if use_gt:
+            low_dim_info = env._get_low_dim_info()
+            state = np.concatenate((tabletop_obs(low_dim_info), very_start))
+        else:
+            state = env.get_obs().flatten()
 
         command_start = time.perf_counter()
         action = mppi.command(state)
@@ -386,8 +390,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter
 
         s, r, done, _ = env.step(action.cpu().numpy())
         total_reward += r
-        # logger.debug(f"action taken: {action} cost received: {-r:.4f} time taken: {elapsed:.5f}s")
-        logger.debug(f"action taken: {action} time taken: {elapsed:.5f}s")
+        # logger.debug(f"action taken: {action} time taken: {elapsed:.5f}s")
         if render:
             env.render()
 

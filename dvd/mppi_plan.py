@@ -157,6 +157,14 @@ def dynamics(state, action):
 def running_cost(state, action):
     return torch.zeros(state.shape[0])
 
+def running_cost_engineered(state, action):
+    # task 94: pushing mug left to right
+    low_dim_state = state[:, :13]
+    very_start = state[:, 13:]
+    left_to_right = -low_dim_state[:, 3:4] + very_start[:, 3:4]
+
+    return left_to_right.to(torch.float32).squeeze()
+
 def terminal_state_cost(states, actions):
     """
     :param states: (K x T x nx) Tensor
@@ -178,8 +186,10 @@ def train(new_data):
 
 if __name__ == '__main__':
     TIMESTEPS = 50 # T = env.max_path_length
-    N_SAMPLES = 10  # K
+    N_SAMPLES = 50  # K
     NUM_ITERS = 1000
+
+    ENGINEERED_REWARDS = True
 
     d = device
     dtype = torch.double
@@ -193,14 +203,26 @@ if __name__ == '__main__':
                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
     env.reset_model()
 
-    video_encoder = load_encoder_model()
-    sim_discriminator = load_discriminator_model()
-    demo = torch.Tensor(decode_gif(args.demo_path))
+    if not ENGINEERED_REWARDS:
+        video_encoder = load_encoder_model()
+        sim_discriminator = load_discriminator_model()
+        demo = torch.Tensor(decode_gif(args.demo_path))
 
-    # state space is image and need to translate back and forth from that
-    nx = 64800 # size of the image 120 x 180 x 3
-    mppi_gym = mppi.MPPI(dynamics, running_cost, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
-                         terminal_state_cost=terminal_state_cost, lambda_=lambda_)
-    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_gym, env, train, args.task_id, iter=NUM_ITERS, render=False)
+
+    # using ground truth rewards
+    if ENGINEERED_REWARDS:
+        nx = 26 # 2 x env_info
+        costs = running_cost_engineered
+        terminal = None
+    else:
+        # state space is image and need to translate back and forth from that
+        nx = 64800 # size of the image 120 x 180 x 3
+        costs = running_cost
+        terminal = terminal_state_cost
+
+    mppi_metaworld = mppi.MPPI(dynamics, costs, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
+                               terminal_state_cost=terminal, lambda_=lambda_)
+    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_metaworld, env, train, args.task_id, 
+                                                                               iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=False)
     # logger.info("Total reward %f", total_reward)
-    logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes}")
+    logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes} - {total_successes / total_episodes}")
