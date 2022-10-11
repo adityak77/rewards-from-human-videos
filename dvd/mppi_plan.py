@@ -149,7 +149,7 @@ def inference(states, demo, model, sim_discriminator):
 
 
 """     Inputs for MPPI      """
-def dynamics(state, action):
+def no_dynamics(state, action):
     """
     unknown dynamics
     might be very inefficient
@@ -161,12 +161,10 @@ def running_cost(state, action):
 
 def running_cost_engineered(state, action):
     # task 94: pushing mug left to right
-    low_dim_state = state[:, :13]
-    very_start = state[:, 13:]
-    left_to_right = -low_dim_state[:, 3:4] + very_start[:, 3:4]
+    left_to_right = -state[:, 3]
 
-    return left_to_right.to(torch.float32).squeeze()
-
+    return left_to_right.to(torch.float32)
+    
 def terminal_state_cost(states, actions):
     """
     :param states: (K x T x nx) Tensor
@@ -212,14 +210,18 @@ if __name__ == '__main__':
 
     # using ground truth rewards
     if ENGINEERED_REWARDS:
-        nx = 26 # 2 x env_info
+        nx = 13 # env_info
         costs = running_cost_engineered
         terminal = None
+
+        dynamics = no_dynamics
     else:
         # state space is image and need to translate back and forth from that
         nx = 64800 # size of the image 120 x 180 x 3
         costs = running_cost
         terminal = terminal_state_cost
+
+        dynamics = no_dynamics
 
     logdir = 'engineered_reward' if ENGINEERED_REWARDS else args.checkpoint.split('/')[1]
     logdir = os.path.join('mppi_plots', logdir)
@@ -229,6 +231,6 @@ if __name__ == '__main__':
     mppi_metaworld = mppi.MPPI(dynamics, costs, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
                                terminal_state_cost=terminal, lambda_=lambda_)
     total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_metaworld, env, train, args.task_id, terminal_state_cost,
-                                                                               logdir, iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=True)
+                                                                               logdir, iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=False)
     # logger.info("Total reward %f", total_reward)
     logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes} - {total_successes / total_episodes}")

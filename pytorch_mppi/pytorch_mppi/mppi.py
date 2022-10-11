@@ -392,7 +392,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
     for i in range(iter):
         if use_gt:
             low_dim_info = env._get_low_dim_info()
-            state = np.concatenate((tabletop_obs(low_dim_info), very_start))
+            state = tabletop_obs(low_dim_info)
         else:
             state = env.get_obs().flatten()
 
@@ -406,11 +406,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
         total_reward += r
         # logger.debug(f"action taken: {action} time taken: {elapsed:.5f}s")
         if render:
-            os.environ['LD_PRELOAD'] = '/usr/lib/x86_64-linux-gnu/libGLEW.so'
-            os.environ['DISPLAY'] = ':1'
             env.render()
-            os.environ['LD_PRELOAD'] = ''
-            os.environ['DISPLAY'] = ''
 
         if done:
             low_dim_info = env._get_low_dim_info()
@@ -420,7 +416,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
             states_reshape = torch.from_numpy(np.stack(states))
             states_reshape = torch.reshape(states_reshape, (states_reshape.shape[0], -1)).unsqueeze(0).unsqueeze(0)
             dvd_reward = -terminal_cost(states_reshape, actions).item()
-            engineered_reward = low_dim_state[3] - very_start[3]
+            engineered_reward = low_dim_state[3] # task 94 specific
 
             result = 'SUCCESS' if succ else 'FAILURE'
             total_successes += succ
