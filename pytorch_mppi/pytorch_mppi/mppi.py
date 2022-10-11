@@ -5,8 +5,11 @@ import logging
 from torch.distributions.multivariate_normal import MultivariateNormal
 import functools
 import numpy as np
+import matplotlib.pyplot as plt
+from collections import deque
 
 logger = logging.getLogger(__name__)
+logging.getLogger('matplotlib.font_manager').disabled = True
 
 
 def _ensure_non_zero(cost, beta, factor):
@@ -367,9 +370,12 @@ def evaluate_episode(low_dim_state, very_start, task_num):
         print("No criteria set")
         assert(False)
 
-    return criteria
+    try:
+        return criteria[0]
+    except:
+        return criteria
 
-def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter=50, iter=1000, use_gt=False, render=True):
+def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, logdir, retrain_after_iter=50, iter=1000, use_gt=False, render=True):
     dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
     total_reward = 0
 
@@ -377,6 +383,12 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter
     total_episodes = 0
     _, start_info = env.reset_model()
     very_start = tabletop_obs(start_info)
+    states = []
+    actions = []
+    rolling_success = deque()
+    dvd_reward_history = []
+    engineered_reward_history = []
+    succ_rate_history = []
     for i in range(iter):
         if use_gt:
             low_dim_info = env._get_low_dim_info()
@@ -389,24 +401,71 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, retrain_after_iter
         elapsed = time.perf_counter() - command_start
 
         s, r, done, _ = env.step(action.cpu().numpy())
+        states.append(s)
+        actions.append(action.cpu().numpy())
         total_reward += r
         # logger.debug(f"action taken: {action} time taken: {elapsed:.5f}s")
         if render:
+            os.environ['LD_PRELOAD'] = '/usr/lib/x86_64-linux-gnu/libGLEW.so'
+            os.environ['DISPLAY'] = ':1'
             env.render()
+            os.environ['LD_PRELOAD'] = ''
+            os.environ['DISPLAY'] = ''
 
         if done:
             low_dim_info = env._get_low_dim_info()
             low_dim_state = tabletop_obs(low_dim_info)
             succ = evaluate_episode(low_dim_state, very_start, task_num)
 
+            states_reshape = torch.from_numpy(np.stack(states))
+            states_reshape = torch.reshape(states_reshape, (states_reshape.shape[0], -1)).unsqueeze(0).unsqueeze(0)
+            dvd_reward = -terminal_cost(states_reshape, actions).item()
+            engineered_reward = low_dim_state[3] - very_start[3]
+
             result = 'SUCCESS' if succ else 'FAILURE'
             total_successes += succ
             total_episodes += 1
-            print(f'----------Episode done: {result}----------')
+            rolling_success.append(succ)
+            print(f'----------Episode done: {result} | dvd_reward: {dvd_reward} | engineered_reward: {engineered_reward}----------')
             print(f'----------Currently at {total_successes} / {total_episodes}----------')
+            
+            if len(rolling_success) > 10:
+                rolling_success.popleft()
+            
+            succ_rate = sum(rolling_success) / len(rolling_success)
+
+            dvd_reward_history.append(dvd_reward)
+            engineered_reward_history.append(engineered_reward)
+            succ_rate_history.append(succ_rate)
+
+            if total_episodes % 2 == 0:
+                print('----------REPLOTTING----------')
+                plt.figure()
+                plt.plot([i for i in range(len(dvd_reward_history))], dvd_reward_history)
+                plt.ylim([0, 1])
+                plt.xlabel('Episode')
+                plt.ylabel('DVD Reward')
+                plt.savefig(os.path.join(logdir, 'dvd_rewards_episode.png'))
+                plt.close()
+
+                plt.figure()
+                plt.plot([i for i in range(len(engineered_reward_history))], engineered_reward_history)
+                plt.xlabel('Episode')
+                plt.ylabel('Engineered Reward')
+                plt.savefig(os.path.join(logdir, 'engineered_reward_episode.png'))
+                plt.close()
+                
+                plt.figure()
+                plt.plot([i for i in range(len(succ_rate_history))], succ_rate_history)
+                plt.xlabel('Episode')
+                plt.ylabel('Rolling Success Rate')
+                plt.savefig(os.path.join(logdir, 'rolling_success_rate_episode.png'))
+                plt.close()
             
             _, start_info = env.reset_model()
             very_start = tabletop_obs(start_info)
+            states = []
+            actions = []
 
         di = i % retrain_after_iter
         if di == 0 and i > 0:

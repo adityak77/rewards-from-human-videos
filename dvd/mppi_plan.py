@@ -31,10 +31,11 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(levelname)s %(asctime)s %(pathname)s:%(lineno)d] %(message)s',
                     datefmt='%m-%d %H:%M:%S')
+logging.getLogger('matplotlib.font_manager').disabled = True
+
 
 # device = 'cpu'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.cuda.set_device(0)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--task_id", type=int, default=94, help="Task to learn a model for")
@@ -57,6 +58,8 @@ parser.add_argument("--verbose", type=bool, default=1)
 # parser.add_argument("--random", action='store_true', default=False) # take random actions
 # parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--xml", type=str, default='env1')
+
+parser.add_argument("--engineered_rewards", action='store_true', default=False, help='Use hand engineered rewards or not')
 
 args = parser.parse_args()
 
@@ -92,7 +95,6 @@ def inference(states, demo, model, sim_discriminator):
         T = trajectory size, nx = state embedding size 
     :param demo: (T x H x W x C) Tensor
     """
-    # import ipdb; ipdb.set_trace()
     states = torch.reshape(states.squeeze(), (states.shape[1], states.shape[2], 120, 180, 3))
     states = (states.numpy() * 255).astype(np.uint8)
 
@@ -187,9 +189,9 @@ def train(new_data):
 if __name__ == '__main__':
     TIMESTEPS = 50 # T = env.max_path_length
     N_SAMPLES = 50  # K
-    NUM_ITERS = 1000
+    NUM_ITERS = 30000
 
-    ENGINEERED_REWARDS = True
+    ENGINEERED_REWARDS = args.engineered_rewards
 
     d = device
     dtype = torch.double
@@ -203,10 +205,9 @@ if __name__ == '__main__':
                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
     env.reset_model()
 
-    if not ENGINEERED_REWARDS:
-        video_encoder = load_encoder_model()
-        sim_discriminator = load_discriminator_model()
-        demo = torch.Tensor(decode_gif(args.demo_path))
+    video_encoder = load_encoder_model()
+    sim_discriminator = load_discriminator_model()
+    demo = torch.Tensor(decode_gif(args.demo_path))
 
 
     # using ground truth rewards
@@ -220,9 +221,14 @@ if __name__ == '__main__':
         costs = running_cost
         terminal = terminal_state_cost
 
+    logdir = 'engineered_reward' if ENGINEERED_REWARDS else args.checkpoint.split('/')[1]
+    logdir = os.path.join('mppi_plots', logdir)
+    if not os.path.isdir(logdir):
+        os.makedirs(logdir)
+
     mppi_metaworld = mppi.MPPI(dynamics, costs, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
                                terminal_state_cost=terminal, lambda_=lambda_)
-    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_metaworld, env, train, args.task_id, 
-                                                                               iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=False)
+    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_metaworld, env, train, args.task_id, terminal_state_cost,
+                                                                               logdir, iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=True)
     # logger.info("Total reward %f", total_reward)
     logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes} - {total_successes / total_episodes}")
