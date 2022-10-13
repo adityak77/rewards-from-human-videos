@@ -25,7 +25,7 @@ import av
 import argparse
 import logging
 
-from pytorch_mppi import mppi
+from pytorch_mppi import mppi_metaworld as mppi
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -186,16 +186,16 @@ def train(new_data):
 
 if __name__ == '__main__':
     TIMESTEPS = 50 # T = env.max_path_length
-    N_SAMPLES = 50  # K
-    NUM_ITERS = 30000
+    N_SAMPLES = 200  # K
+    NUM_ITERS = 10000
 
     ENGINEERED_REWARDS = args.engineered_rewards
 
     d = device
     dtype = torch.double
 
-    noise_sigma = 10 * torch.eye(4, dtype=dtype, device=d) 
-    lambda_ = 1.
+    noise_sigma = torch.eye(4, dtype=dtype, device=d) 
+    lambda_ = 1e-2
 
     env = Tabletop(log_freq=args.env_log_freq, 
                    filepath=args.log_dir + '/env',
@@ -224,6 +224,7 @@ if __name__ == '__main__':
         dynamics = no_dynamics
 
     logdir = 'engineered_reward' if ENGINEERED_REWARDS else args.checkpoint.split('/')[1]
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{lambda_}'
     logdir = os.path.join('mppi_plots', logdir)
     if not os.path.isdir(logdir):
         os.makedirs(logdir)

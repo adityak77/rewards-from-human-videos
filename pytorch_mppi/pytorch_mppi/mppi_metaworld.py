@@ -243,10 +243,8 @@ class MPPI():
         saved_path_length = env.cur_path_length
         for k in range(K):
             curr_state = state[:, k, :]
-            # tstart = time.perf_counter()
             for t in range(T):
                 u = self.u_scale * perturbed_actions[k, t].repeat(self.M, 1, 1)
-                # import ipdb; ipdb.set_trace()
                 obs, _, _, _ = env.step(u.cpu().numpy().squeeze())
                 # curr_state = self._dynamics(curr_state, u, t)
                 curr_state = torch.Tensor(tabletop_obs(env._get_low_dim_info())).to(self.d).unsqueeze(0)
@@ -260,10 +258,8 @@ class MPPI():
                 actions[k, t] = u
 
             # reset to saved_env_state
-            # tend = time.perf_counter()
             env.set_env_state(saved_env_state)
             env.cur_path_length = saved_path_length
-            # print(f'Time elapsed for sample: {tend-tstart}')
 
         # action perturbation cost
         if self.terminal_state_cost:
@@ -332,32 +328,6 @@ class MPPI():
                                               self.u_scale * self.U[t].view(num_rollouts, -1), t)
         return states[:, 1:]
 
-
-def run_mppi(mppi, env, retrain_dynamics, retrain_after_iter=50, iter=1000, render=True):
-    dataset = torch.zeros((retrain_after_iter, mppi.nx + mppi.nu), dtype=mppi.U.dtype, device=mppi.d)
-    total_reward = 0
-    for i in range(iter):
-        state = env.state.copy()
-
-        command_start = time.perf_counter()
-        action = mppi.command(state)
-        elapsed = time.perf_counter() - command_start
-
-        s, r, _, _ = env.step(action.cpu().numpy())
-        total_reward += r
-        logger.debug(f"action taken: {action} cost received: {-r:.4f} time taken: {elapsed:.5f}s")
-        if render:
-            env.render()
-
-        di = i % retrain_after_iter
-        if di == 0 and i > 0:
-            retrain_dynamics(dataset)
-            # don't have to clear dataset since it'll be overridden, but useful for debugging
-            dataset.zero_()
-        dataset[di, :mppi.nx] = torch.tensor(state, dtype=mppi.U.dtype)
-        dataset[di, mppi.nx:] = action
-    return total_reward, dataset
-
 def tabletop_obs(info):
     hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
     mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
@@ -376,7 +346,7 @@ def evaluate_episode(low_dim_state, very_start, task_num):
     if task_num == 5: # close drawer
         criteria = drawer_open < 0.01 and np.abs(right_to_left) < 0.01
     elif task_num == 94: # move cup right to left
-        criteria = left_to_right < -0.05 and drawer_move < 0.03 and move_faucet < 0.01
+        criteria = left_to_right < -0.05 # and drawer_move < 0.03 and move_faucet < 0.01
     elif task_num == 45: # Push cup forward
         criteria = abs(right_to_left) < 0.04 and forward > 0.1
     else:
