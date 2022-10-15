@@ -181,12 +181,46 @@ class CEM():
 
         return u
 
+def tabletop_obs(info):
+    hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
+    mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
+    mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
+    init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
+    return init_low_dim
 
-def run_cem(cem, env, retrain_dynamics, retrain_after_iter=50, iter=1000, render=True, choose_best=False):
+def evaluate_episode(low_dim_state, very_start, task_num):
+    right_to_left = low_dim_state[3:4] - very_start[3:4]
+    left_to_right = -low_dim_state[3:4] + very_start[3:4]
+    forward = low_dim_state[4:5] - very_start[4:5]
+    drawer_move = np.abs(low_dim_state[10] - very_start[10])
+    drawer_open = np.abs(low_dim_state[10])
+    move_faucet = low_dim_state[12]
+
+    if task_num == 5: # close drawer
+        criteria = drawer_open < 0.01 and np.abs(right_to_left) < 0.01
+    elif task_num == 94: # move cup right to left
+        criteria = left_to_right < -0.05 # and drawer_move < 0.03 and move_faucet < 0.01
+    elif task_num == 45: # Push cup forward
+        criteria = abs(right_to_left) < 0.04 and forward > 0.1
+    else:
+        print("No criteria set")
+        assert(False)
+
+    try:
+        return criteria[0]
+    except:
+        return criteria
+
+def run_cem(cem, env, retrain_dynamics, retrain_after_iter=50, iter=1000, use_gt=False, render=True, choose_best=False):
     dataset = torch.zeros((retrain_after_iter, cem.nx + cem.nu), dtype=cem.dtype, device=cem.d)
     total_reward = 0
     for i in range(iter):
-        state = env.state.copy()
+        if use_gt:
+            low_dim_info = env._get_low_dim_info()
+            state = tabletop_obs(low_dim_info)
+        else:
+            state = env.get_obs().flatten()
+
         command_start = time.perf_counter()
         action = cem.command(state, choose_best=choose_best)
         elapsed = time.perf_counter() - command_start

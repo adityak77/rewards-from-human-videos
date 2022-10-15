@@ -191,8 +191,10 @@ def train(new_data):
 def running_reward_engineered(state, action):
     # task 94: pushing mug right to left
     left_to_right = state[:, 3]
+    # penalty = (left_to_right > 0.1).to(torch.float) * -100
+    reward = left_to_right # + penalty
 
-    return left_to_right.to(torch.float32)
+    return reward.to(torch.float32)
 
 if __name__ == '__main__':
     TIMESTEPS = 51 # MPC lookahead
@@ -217,7 +219,7 @@ if __name__ == '__main__':
 
     # for logging
     logdir = 'engineered_reward'
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_EPISODES}_pkl'
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_EPISODES}_sampling_rewards'
     logdir = os.path.join('cem_plots', logdir)
     logdir_episode = os.path.join(logdir, 'episodes')
     if not os.path.isdir(logdir):
@@ -237,6 +239,7 @@ if __name__ == '__main__':
         done = False
         iters = 0
         step_rewards = []
+        mean_sampling_rewards = []
         while not done:
             tstart = time.perf_counter()
             action_distribution = MultivariateNormal(actions_mean, actions_cov)
@@ -256,6 +259,7 @@ if __name__ == '__main__':
                 env.set_env_state(saved_env_state)
                 env.cur_path_length = saved_path_length
             
+            mean_sampling_rewards.append(sample_rewards.mean() + sum(step_rewards))
             # update elites
             _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
             elites = action_samples[best_inds]
@@ -270,19 +274,24 @@ if __name__ == '__main__':
                         actions_cov[i, j] = max(actions_cov[i,j], 1e-8)
 
             # MPC step
-            action = elites[0, iters*nu:(iters+1)*nu] # from CEM
+            traj_distribution = MultivariateNormal(actions_mean, actions_cov)
+            traj_samples = traj_distribution.sample((1,))
+            action = traj_samples[0, iters*nu:(iters+1)*nu] # from CEM
             s, r, done, low_dim_info = env.step(action.cpu().numpy())
             iters += 1
             tend = time.perf_counter()
             rew = tabletop_obs(low_dim_info)[3] - very_start[3]
             step_rewards.append(rew)
-            logger.debug(f"Step time: {tend-tstart:.4f}\t Step reward: {rew:.6f}")
+            logger.debug(f"{env.cur_path_length}: Step time: {tend-tstart:.4f}\t Step reward: {rew:.6f}\t Action: {action}")
 
         cumulative_step_rewards.append(step_rewards)
         # calculate success and reward of trajectory
         low_dim_state = tabletop_obs(low_dim_info)
         episode_reward = low_dim_state[3] - very_start[3]
-        succ = episode_reward > 0.05
+        # penalty = (episode_reward > 0.1) * -100
+        # episode_reward += penalty
+
+        succ = episode_reward > 0.05 # and episode_reward < 0.1
         
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
@@ -328,5 +337,13 @@ if __name__ == '__main__':
         plt.savefig(os.path.join(logdir_episode, f'episode_rewards{ep}.png'))
         plt.close()
         
+        plt.figure()
+        plt.plot([i for i in range(len(mean_sampling_rewards))], mean_sampling_rewards)
+        plt.xlabel('Step')
+        plt.ylabel('Mean Sampled Trajectories Reward')
+        plt.title(f'Mean Reward of Sampled Trajectories in episode {ep}')
+        plt.savefig(os.path.join(logdir_episode, f'episode_sampled_traj_rewards{ep}.png'))
+        plt.close()
+
         _, start_info = env.reset_model()
         very_start = tabletop_obs(start_info)

@@ -185,14 +185,17 @@ def train(new_data):
     pass
 
 if __name__ == '__main__':
-    TIMESTEPS = 50 # T = env.max_path_length
-    N_SAMPLES = 200  # K
+    TIMESTEPS = 51 # T = env.max_path_length
+    N_SAMPLES = 100  # K
     NUM_ITERS = 10000
 
     ENGINEERED_REWARDS = args.engineered_rewards
 
     d = device
     dtype = torch.double
+
+    u_min = torch.Tensor([-1.0, -1.0, -1.0, float('-inf')]).to(dtype=dtype)
+    u_max = torch.Tensor([1.0, 1.0, 1.0, float('inf')]).to(dtype=dtype)
 
     noise_sigma = torch.eye(4, dtype=dtype, device=d) 
     lambda_ = 1e-2
@@ -206,7 +209,6 @@ if __name__ == '__main__':
     video_encoder = load_encoder_model()
     sim_discriminator = load_discriminator_model()
     demo = torch.Tensor(decode_gif(args.demo_path))
-
 
     # using ground truth rewards
     if ENGINEERED_REWARDS:
@@ -230,7 +232,7 @@ if __name__ == '__main__':
         os.makedirs(logdir)
 
     mppi_metaworld = mppi.MPPI(dynamics, costs, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
-                               terminal_state_cost=terminal, lambda_=lambda_)
+                               terminal_state_cost=terminal, lambda_=lambda_, u_min=u_min, u_max=u_max)
     total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_metaworld, env, train, args.task_id, terminal_state_cost,
                                                                                logdir, iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=False)
     # logger.info("Total reward %f", total_reward)

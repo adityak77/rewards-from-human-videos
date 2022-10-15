@@ -189,8 +189,9 @@ class MPPI():
         :returns action: (nu) best action
         """
         # shift command 1 time step
-        self.U = torch.roll(self.U, -1, dims=0)
-        self.U[-1] = self.u_init
+        # import ipdb; ipdb.set_trace()
+        # self.U = torch.roll(self.U, -1, dims=0)
+        # self.U[-1] = self.u_init
 
         if not torch.is_tensor(state):
             state = torch.tensor(state)
@@ -243,7 +244,7 @@ class MPPI():
         saved_path_length = env.cur_path_length
         for k in range(K):
             curr_state = state[:, k, :]
-            for t in range(T):
+            for t in range(saved_path_length, T):
                 u = self.u_scale * perturbed_actions[k, t].repeat(self.M, 1, 1)
                 obs, _, _, _ = env.step(u.cpu().numpy().squeeze())
                 # curr_state = self._dynamics(curr_state, u, t)
@@ -384,11 +385,12 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
         # import ipdb; ipdb.set_trace()
         elapsed = time.perf_counter() - command_start
 
-        s, r, done, _ = env.step(action.cpu().numpy())
+        s, _, done, low_dim_info = env.step(action.cpu().numpy())
         states.append(s)
         actions.append(action.cpu().numpy())
+        r = tabletop_obs(low_dim_info)[3] - very_start[3]
         total_reward += r
-        logger.debug(f"action taken: {action} time taken: {elapsed:.5f}s")
+        logger.debug(f"{i}: state reward: {r:.6f} action taken: {action} time taken: {elapsed:.5f}s")
         if render:
             env.render()
 
