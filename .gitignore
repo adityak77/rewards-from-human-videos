@@ -1,3 +1,8 @@
+.vscode/
+
+dvd/mppi/
+dvd/mppi_plots/
+dvd/cem_plots/
 dvd/data*
 dvd/test/*
 dvd/tmp
