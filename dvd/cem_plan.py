@@ -28,7 +28,7 @@ import argparse
 import logging
 import pickle
 
-from pytorch_mppi.mppi_metaworld import tabletop_obs, evaluate_episode
+from pytorch_mppi.mppi_metaworld import tabletop_obs, evaluate_iteration
 
 
 logger = logging.getLogger(__name__)
@@ -200,7 +200,7 @@ if __name__ == '__main__':
     TIMESTEPS = 51 # MPC lookahead
     N_SAMPLES = 100
     NUM_ELITES = 7
-    NUM_EPISODES = 100
+    NUM_ITERATIONS = 100
     nu = 4
 
     dtype = torch.double
@@ -219,23 +219,23 @@ if __name__ == '__main__':
 
     # for logging
     logdir = 'engineered_reward'
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_EPISODES}_sampling_rewards'
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_sampling_rewards'
     logdir = os.path.join('cem_plots', logdir)
-    logdir_episode = os.path.join(logdir, 'episodes')
+    logdir_iteration = os.path.join(logdir, 'iterations')
     if not os.path.isdir(logdir):
         os.makedirs(logdir)
-    if not os.path.isdir(logdir_episode):
-        os.makedirs(logdir_episode)
+    if not os.path.isdir(logdir_iteration):
+        os.makedirs(logdir_iteration)
 
     total_successes = 0
-    total_episodes = 0
+    total_iterations = 0
     rolling_success = deque()
     dvd_reward_history = []
-    episode_reward_history = []
+    iteration_reward_history = []
     succ_rate_history = []
 
     cumulative_step_rewards = []
-    for ep in range(NUM_EPISODES):
+    for ep in range(NUM_ITERATIONS):
         done = False
         iters = 0
         step_rewards = []
@@ -287,62 +287,62 @@ if __name__ == '__main__':
         cumulative_step_rewards.append(step_rewards)
         # calculate success and reward of trajectory
         low_dim_state = tabletop_obs(low_dim_info)
-        episode_reward = low_dim_state[3] - very_start[3]
-        # penalty = (episode_reward > 0.1) * -100
-        # episode_reward += penalty
+        iteration_reward = low_dim_state[3] - very_start[3]
+        # penalty = (iteration_reward > 0.1) * -100
+        # iteration_reward += penalty
 
-        succ = episode_reward > 0.05 # and episode_reward < 0.1
+        succ = iteration_reward > 0.05 # and iteration_reward < 0.1
         
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
         total_successes += succ
-        total_episodes += 1
+        total_iterations += 1
         rolling_success.append(succ)
-        print(f'----------Episode done: {result} | episode_reward: {episode_reward}----------')
-        print(f'----------Currently at {total_successes} / {total_episodes}----------')
+        print(f'----------Iteration done: {result} | iteration_reward: {iteration_reward}----------')
+        print(f'----------Currently at {total_successes} / {total_iterations}----------')
         
         if len(rolling_success) > 10:
             rolling_success.popleft()
         
         succ_rate = sum(rolling_success) / len(rolling_success)
 
-        # episode_reward_history.append(episode_reward)
-        episode_reward_history.append(sum(step_rewards))
+        # iteration_reward_history.append(iteration_reward)
+        iteration_reward_history.append(sum(step_rewards))
         succ_rate_history.append(succ_rate)
 
         # logging results
-        with open(os.path.join(logdir, 'episode_results.pkl'), 'wb') as f:
+        with open(os.path.join(logdir, 'iteration_results.pkl'), 'wb') as f:
             pickle.dump(cumulative_step_rewards, f)
 
         print('----------REPLOTTING----------')
         plt.figure()
-        plt.plot([i for i in range(len(episode_reward_history))], episode_reward_history)
-        plt.xlabel('Episode')
-        plt.ylabel('Total Reward in episode')
-        plt.savefig(os.path.join(logdir, 'engineered_reward_episode.png'))
+        plt.plot([i for i in range(len(iteration_reward_history))], iteration_reward_history)
+        plt.xlabel('Iteration')
+        plt.ylabel('Total Reward in iteration')
+        plt.savefig(os.path.join(logdir, 'engineered_reward_iteration.png'))
         plt.close()
         
         plt.figure()
         plt.plot([i for i in range(len(succ_rate_history))], succ_rate_history)
-        plt.xlabel('Episode')
+        plt.xlabel('Iteration')
         plt.ylabel('Rolling Success Rate')
-        plt.savefig(os.path.join(logdir, 'rolling_success_rate_episode.png'))
+        plt.savefig(os.path.join(logdir, 'rolling_success_rate_iteration.png'))
         plt.close()
 
         plt.figure()
         plt.plot([i for i in range(len(step_rewards))], step_rewards)
         plt.xlabel('Step')
         plt.ylabel('Reward')
-        plt.title(f'State rewards in episode {ep}')
-        plt.savefig(os.path.join(logdir_episode, f'episode_rewards{ep}.png'))
+        plt.title(f'State rewards in iteration {ep}')
+        plt.savefig(os.path.join(logdir_iteration, f'iteration_rewards{ep}.png'))
         plt.close()
         
         plt.figure()
         plt.plot([i for i in range(len(mean_sampling_rewards))], mean_sampling_rewards)
         plt.xlabel('Step')
         plt.ylabel('Mean Sampled Trajectories Reward')
-        plt.title(f'Mean Reward of Sampled Trajectories in episode {ep}')
-        plt.savefig(os.path.join(logdir_episode, f'episode_sampled_traj_rewards{ep}.png'))
+        plt.title(f'Mean Reward of Sampled Trajectories in iteration {ep}')
+        plt.savefig(os.path.join(logdir_iteration, f'iteration_sampled_traj_rewards{ep}.png'))
         plt.close()
 
         _, start_info = env.reset_model()

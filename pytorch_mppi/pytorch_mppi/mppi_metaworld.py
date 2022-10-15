@@ -336,7 +336,7 @@ def tabletop_obs(info):
     init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
     return init_low_dim
 
-def evaluate_episode(low_dim_state, very_start, task_num):
+def evaluate_iteration(low_dim_state, very_start, task_num):
     right_to_left = low_dim_state[3:4] - very_start[3:4]
     left_to_right = -low_dim_state[3:4] + very_start[3:4]
     forward = low_dim_state[4:5] - very_start[4:5]
@@ -364,7 +364,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
     total_reward = 0
 
     total_successes = 0
-    total_episodes = 0
+    total_iterations = 0
     _, start_info = env.reset_model()
     very_start = tabletop_obs(start_info)
     states = []
@@ -397,7 +397,7 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
         if done:
             low_dim_info = env._get_low_dim_info()
             low_dim_state = tabletop_obs(low_dim_info)
-            succ = evaluate_episode(low_dim_state, very_start, task_num)
+            succ = evaluate_iteration(low_dim_state, very_start, task_num)
 
             states_reshape = torch.from_numpy(np.stack(states))
             states_reshape = torch.reshape(states_reshape, (states_reshape.shape[0], -1)).unsqueeze(0).unsqueeze(0)
@@ -406,10 +406,10 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
 
             result = 'SUCCESS' if succ else 'FAILURE'
             total_successes += succ
-            total_episodes += 1
+            total_iterations += 1
             rolling_success.append(succ)
-            print(f'----------Episode done: {result} | dvd_reward: {dvd_reward} | engineered_reward: {engineered_reward}----------')
-            print(f'----------Currently at {total_successes} / {total_episodes}----------')
+            print(f'----------Iteration done: {result} | dvd_reward: {dvd_reward} | engineered_reward: {engineered_reward}----------')
+            print(f'----------Currently at {total_successes} / {total_iterations}----------')
             
             if len(rolling_success) > 10:
                 rolling_success.popleft()
@@ -420,28 +420,28 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
             engineered_reward_history.append(engineered_reward)
             succ_rate_history.append(succ_rate)
 
-            if total_episodes % 2 == 0:
+            if total_iterations % 2 == 0:
                 print('----------REPLOTTING----------')
                 plt.figure()
                 plt.plot([i for i in range(len(dvd_reward_history))], dvd_reward_history)
                 plt.ylim([0, 1])
-                plt.xlabel('Episode')
+                plt.xlabel('Iteration')
                 plt.ylabel('DVD Reward')
-                plt.savefig(os.path.join(logdir, 'dvd_rewards_episode.png'))
+                plt.savefig(os.path.join(logdir, 'dvd_rewards_iteration.png'))
                 plt.close()
 
                 plt.figure()
                 plt.plot([i for i in range(len(engineered_reward_history))], engineered_reward_history)
-                plt.xlabel('Episode')
+                plt.xlabel('Iteration')
                 plt.ylabel('Engineered Reward')
-                plt.savefig(os.path.join(logdir, 'engineered_reward_episode.png'))
+                plt.savefig(os.path.join(logdir, 'engineered_reward_iteration.png'))
                 plt.close()
                 
                 plt.figure()
                 plt.plot([i for i in range(len(succ_rate_history))], succ_rate_history)
-                plt.xlabel('Episode')
+                plt.xlabel('Iteration')
                 plt.ylabel('Rolling Success Rate')
-                plt.savefig(os.path.join(logdir, 'rolling_success_rate_episode.png'))
+                plt.savefig(os.path.join(logdir, 'rolling_success_rate_iteration.png'))
                 plt.close()
             
             _, start_info = env.reset_model()
@@ -457,4 +457,4 @@ def run_mppi_metaworld(mppi, env, retrain_dynamics, task_num, terminal_cost, log
         dataset[di, :mppi.nx] = torch.tensor(state, dtype=mppi.U.dtype)
         dataset[di, mppi.nx:] = action
 
-    return total_reward, total_successes, total_episodes, dataset
+    return total_reward, total_successes, total_iterations, dataset
