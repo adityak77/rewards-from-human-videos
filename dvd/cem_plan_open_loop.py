@@ -23,6 +23,7 @@ import time
 from collections import deque
 from PIL import Image
 import imageio
+import copy
 
 import importlib
 import av
@@ -58,8 +59,12 @@ args = parser.parse_args()
 
 def running_reward_engineered(state, action):
     # task 94: pushing mug right to left
-    left_to_right = state[:, 3] - very_start[3]
-    penalty = (left_to_right > 0.3).to(torch.float) * -100
+    left_to_right = -torch.abs(state[:, 3] - very_start[3] - 0.15) + 0.15
+    drawer_move = torch.abs(state[:, 10] - very_start[10]) 
+    move_faucet = state[:, 12]
+
+    # penalty = (left_to_right > 0.15).to(torch.float) * -100
+    penalty = 0 if (drawer_move < 0.03 and move_faucet < 0.01) else -100
     reward = left_to_right + penalty
 
     return reward.to(torch.float32)
@@ -68,25 +73,17 @@ if __name__ == '__main__':
     TIMESTEPS = 51 # MPC lookahead
     N_SAMPLES = 100
     NUM_ELITES = 7
-    NUM_ITERATIONS = 100
+    NUM_ITERATIONS = 1000
     nu = 4
 
     dtype = torch.double
-
-    # env initialization
-    env = Tabletop(log_freq=args.env_log_freq, 
-                   filepath=args.log_dir + '/env',
-                   xml=args.xml,
-                   verbose=args.verbose)  # bypass the default TimeLimit wrapper
-    _, start_info = env.reset_model()
-    very_start = tabletop_obs(start_info)
 
     # initialization
     actions_mean = torch.zeros(TIMESTEPS * nu)
     actions_cov = torch.eye(TIMESTEPS * nu)
 
     # for logging
-    logdir = 'engineered_reward'
+    logdir = 'engineered_reward' if args.engineered_rewards else args.checkpoint.split('/')[1]
     logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_open_loop'
     logdir = os.path.join('cem_plots', logdir)
     logdir_iteration = os.path.join(logdir, 'iterations')
@@ -103,21 +100,30 @@ if __name__ == '__main__':
     mean_sampled_traj_history = []
 
     for ep in range(NUM_ITERATIONS):
+        # env initialization
+        env = Tabletop(log_freq=args.env_log_freq, 
+                    filepath=args.log_dir + '/env',
+                    xml=args.xml,
+                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
+        _, start_info = env.reset_model()
+        very_start = tabletop_obs(start_info)
+
         tstart = time.perf_counter()
         action_distribution = MultivariateNormal(actions_mean, actions_cov)
         action_samples = action_distribution.sample((N_SAMPLES,))
         sample_rewards = torch.zeros(N_SAMPLES)
 
         for i in range(N_SAMPLES):
+            env_copy = copy.deepcopy(env)
             for t in range(TIMESTEPS):
                 u = action_samples[i, nu*t:nu*(t+1)]
-                _, _, _, env_info = env.step(u.cpu().numpy())
+                _, _, _, env_copy_info = env_copy.step(u.cpu().numpy())
             
-            curr_state = torch.Tensor(tabletop_obs(env_info)).to(device).unsqueeze(0)
+            curr_state = torch.Tensor(tabletop_obs(env_copy_info)).to(device).unsqueeze(0)
             reward = running_reward_engineered(curr_state, u)
             sample_rewards[i] = reward
 
-            env.reset_model()
+            # env_copy.reset_model()
         
         # update elites
         _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
@@ -153,11 +159,12 @@ if __name__ == '__main__':
 
         # calculate success and reward of trajectory
         low_dim_state = tabletop_obs(low_dim_info)
-        iteration_reward = low_dim_state[3] - very_start[3]
-        penalty = (iteration_reward > 0.3) * -100
+        iteration_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
+        # penalty = (iteration_reward > 0.15) * -100
+        penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
         iteration_reward += penalty
 
-        succ = iteration_reward > 0.05 and iteration_reward < 0.3
+        succ = iteration_reward > 0.05
         
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
@@ -203,5 +210,5 @@ if __name__ == '__main__':
         # store video of path
         imageio.mimsave(os.path.join(logdir_iteration, f'iteration{ep}.gif'), all_obs, fps=20)
         
-        _, start_info = env.reset_model()
-        very_start = tabletop_obs(start_info)
+        # _, start_info = env.reset_model()
+        # very_start = tabletop_obs(start_info)
