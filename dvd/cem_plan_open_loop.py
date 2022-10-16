@@ -93,13 +93,11 @@ def load_encoder_model():
 
 def inference(states, demo, model, sim_discriminator):
     """
-    :param states: (K x T x nx) Tensor
+    :param states: (K x T x H x W x C) np.ndarray
         T = trajectory size, nx = state embedding size 
-    :param demo: (T x H x W x C) Tensor
+    :param demo: (T x H x W x C) List[np.ndarray]
     """
-    # import ipdb; ipdb.set_trace()
-    # states = torch.reshape(states.squeeze(), (states.shape[1], states.shape[2], 120, 180, 3))
-    states = (states.numpy() * 255).astype(np.uint8)
+    states = (states * 255).astype(np.uint8)
 
     transform = ComposeMix([
         [Scale(args.im_size), "img"],
@@ -115,30 +113,30 @@ def inference(states, demo, model, sim_discriminator):
     sim_discriminator.eval()
 
     # process states
-    def process_video(samples):
+    def process_batch(samples):
         """
-        :param samples: (K x T x H x W x C) Tensor
+        :param samples: (K x T x H x W x C) np.ndarray
             to prepare before encoding by networks
         """
         K, T, H, W, C = tuple(samples.shape)
 
-        samples = torch.transpose(samples, 0, 1) # shape T x K x H x W x C
-        sample_downsample = samples[1::max(1, len(samples) // 30)][:30]
-        sample_downsample = torch.transpose(sample_downsample, 0, 1) # shape T x K x H x W x C
-        # Flatten as (K x T) x H x W x C
-        sample_flattened = torch.reshape(sample_downsample, (-1, H, W, C))
+        samples = np.swapaxes(samples, 0, 1) # shape T x K x H x W x C
+        sample_downsample = samples[1::max(1, len(samples) // 30)][:30] # downsample 30 x K x H x W x C
+        sample_downsample = np.swapaxes(sample_downsample, 0, 1) # shape K x 30 x H x W x C
+        # Flatten as (K x 30) x H x W x C
+        sample_flattened = np.reshape(sample_downsample, (-1, H, W, C))
         
         sample_flattened = [elem for elem in sample_flattened] # need to convert to list to make PIL image conversion
 
-        # sample_transform should be K x 30 x T x 120 x 120 after cropping and trajectory downsampling
+        # sample_transform should be K x 30 x C x 120 x 120 after cropping and trajectory downsampling
         sample_transform = torch.stack(transform(sample_flattened))
         sample_transform = sample_transform.reshape(K, 30, C, 120, 120).permute(0, 2, 1, 3, 4)
         sample_data = [sample_transform.to(device)]
 
         return sample_data
     
-    demo_data = process_video(demo.unsqueeze(0))
-    states_data = process_video(torch.Tensor(states))
+    demo_data = process_batch(np.expand_dims(np.array(demo), axis=0))
+    states_data = process_batch(states)
 
     # evaluate trajectory reward
     with torch.no_grad():
@@ -193,7 +191,7 @@ if __name__ == '__main__':
     else:
         video_encoder = load_encoder_model()
         sim_discriminator = load_discriminator_model()
-        demo = torch.Tensor(decode_gif(args.demo_path))
+        demo = decode_gif(args.demo_path)
         terminal_reward_fn = dvd_reward
 
     # initialization
@@ -232,14 +230,14 @@ if __name__ == '__main__':
         sample_rewards = torch.zeros(N_SAMPLES)
 
         if not args.engineered_rewards:
-            states = torch.zeros(N_SAMPLES, TIMESTEPS, 120, 180, 3)
+            states = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
         for i in range(N_SAMPLES):
             env_copy = copy.deepcopy(env)
             for t in range(TIMESTEPS):
                 u = action_samples[i, nu*t:nu*(t+1)]
                 obs, _, _, env_copy_info = env_copy.step(u.cpu().numpy())
                 if not args.engineered_rewards:
-                    states[i, t] = torch.Tensor(obs).to(device)
+                    states[i, t] = obs
             
             if args.engineered_rewards:
                 curr_state = torch.Tensor(tabletop_obs(env_copy_info)).to(device).unsqueeze(0)
@@ -271,14 +269,14 @@ if __name__ == '__main__':
         # logging sampled trajectory
         all_obs = []
         if not args.engineered_rewards:
-            states = torch.zeros(1, TIMESTEPS, 120, 180, 3)
+            states = np.zeros((1, TIMESTEPS, 120, 180, 3))
 
         while not done:
             action = traj_sample[0, iters*nu:(iters+1)*nu] # from CEM
-            s, r, done, low_dim_info = env.step(action.cpu().numpy())
+            obs, r, done, low_dim_info = env.step(action.cpu().numpy())
             if not args.engineered_rewards:
-                states[0, t] = torch.Tensor(obs).to(device)
-            all_obs.append((s * 255).astype(np.uint8))
+                states[0, t] = obs
+            all_obs.append((obs * 255).astype(np.uint8))
             iters += 1
         tend = time.perf_counter()
         rew = tabletop_obs(low_dim_info)[3] - very_start[3]
