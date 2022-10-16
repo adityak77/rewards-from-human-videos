@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 import random
 import time
 from collections import deque
+from PIL import Image
+import imageio
 
 import importlib
 import av
@@ -57,8 +59,8 @@ args = parser.parse_args()
 def running_reward_engineered(state, action):
     # task 94: pushing mug right to left
     left_to_right = state[:, 3] - very_start[3]
-    # penalty = (left_to_right > 0.1).to(torch.float) * -100
-    reward = left_to_right # + penalty
+    penalty = (left_to_right > 0.3).to(torch.float) * -100
+    reward = left_to_right + penalty
 
     return reward.to(torch.float32)
 
@@ -135,9 +137,15 @@ if __name__ == '__main__':
         traj_sample = action_distribution.sample((1,))
         iters = 0
         done = False
+
+        # logging sampled trajectory
+        all_obs = []
+
         while not done:
             action = traj_sample[0, iters*nu:(iters+1)*nu] # from CEM
+            # print(action)
             s, r, done, low_dim_info = env.step(action.cpu().numpy())
+            all_obs.append((s * 255).astype(np.uint8))
             iters += 1
         tend = time.perf_counter()
         rew = tabletop_obs(low_dim_info)[3] - very_start[3]
@@ -146,10 +154,10 @@ if __name__ == '__main__':
         # calculate success and reward of trajectory
         low_dim_state = tabletop_obs(low_dim_info)
         iteration_reward = low_dim_state[3] - very_start[3]
-        # penalty = (iteration_reward > 0.1) * -100
-        # iteration_reward += penalty
+        penalty = (iteration_reward > 0.3) * -100
+        iteration_reward += penalty
 
-        succ = iteration_reward > 0.05 # and iteration_reward < 0.1
+        succ = iteration_reward > 0.05 and iteration_reward < 0.3
         
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
@@ -191,6 +199,9 @@ if __name__ == '__main__':
         plt.title(f'Mean Reward of Sampled Trajectories')
         plt.savefig(os.path.join(logdir, 'mean_reward_sampled_traj_iteration.png'))
         plt.close()
+
+        # store video of path
+        imageio.mimsave(os.path.join(logdir_iteration, f'iteration{ep}.gif'), all_obs, fps=20)
         
         _, start_info = env.reset_model()
         very_start = tabletop_obs(start_info)
