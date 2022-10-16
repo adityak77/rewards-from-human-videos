@@ -25,7 +25,7 @@ import av
 import argparse
 import logging
 
-from pytorch_mppi import mppi_metaworld as mppi
+from pytorch_cem import cem_metaworld as cem
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -185,9 +185,11 @@ def train(new_data):
     pass
 
 if __name__ == '__main__':
-    TIMESTEPS = 51 # T = env.max_path_length
-    N_SAMPLES = 100  # K
-    NUM_ITERS = 10000
+    TIMESTEPS = 51 # MPC lookahead
+    N_SAMPLES = 100
+    NUM_ELITES = 7
+    NUM_ITERS = 5100
+    nu = 4
 
     ENGINEERED_REWARDS = args.engineered_rewards
 
@@ -197,8 +199,7 @@ if __name__ == '__main__':
     u_min = torch.Tensor([-1.0, -1.0, -1.0, float('-inf')]).to(dtype=dtype)
     u_max = torch.Tensor([1.0, 1.0, 1.0, float('inf')]).to(dtype=dtype)
 
-    noise_sigma = torch.eye(4, dtype=dtype, device=d) 
-    lambda_ = 1e-2
+    noise_sigma = torch.eye(nu, dtype=dtype, device=d) 
 
     env = Tabletop(log_freq=args.env_log_freq, 
                    filepath=args.log_dir + '/env',
@@ -213,8 +214,8 @@ if __name__ == '__main__':
     # using ground truth rewards
     if ENGINEERED_REWARDS:
         nx = 13 # env_info
-        costs = running_cost_engineered
-        terminal = None
+        costs = running_cost # running_cost_engineered
+        terminal = running_cost_engineered
 
         dynamics = no_dynamics
     else:
@@ -226,14 +227,14 @@ if __name__ == '__main__':
         dynamics = no_dynamics
 
     logdir = 'engineered_reward' if ENGINEERED_REWARDS else args.checkpoint.split('/')[1]
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{lambda_}'
-    logdir = os.path.join('mppi_plots', logdir)
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ELITES}'
+    logdir = os.path.join('pytorch_cem_plots', logdir)
     if not os.path.isdir(logdir):
         os.makedirs(logdir)
 
-    mppi_metaworld = mppi.MPPI(dynamics, costs, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
-                               terminal_state_cost=terminal, lambda_=lambda_, u_min=u_min, u_max=u_max)
-    total_reward, total_successes, total_episodes, _ = mppi.run_mppi_metaworld(mppi_metaworld, env, train, args.task_id, terminal_state_cost,
-                                                                               logdir, iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=False)
+    cem_metaworld = cem.CEM(dynamics, costs, nx, nu, num_samples=N_SAMPLES, num_iterations=1, num_elite=NUM_ELITES,
+                            horizon=TIMESTEPS, device=d, terminal_state_cost=terminal, u_min=u_min, u_max=u_max)
+    total_successes, total_episodes, _ = cem.run_cem_metaworld(cem_metaworld, env, train, args.task_id, terminal_state_cost,
+                                                                             logdir, iter=NUM_ITERS, use_gt=ENGINEERED_REWARDS, render=False)
     # logger.info("Total reward %f", total_reward)
-    logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes} - {total_successes / total_episodes}")
+    logger.info(f"Fraction successful episodes: {total_successes} / {total_episodes}")

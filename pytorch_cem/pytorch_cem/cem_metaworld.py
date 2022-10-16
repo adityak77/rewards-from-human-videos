@@ -1,7 +1,12 @@
 import torch
+import os
 import time
 import logging
 from torch.distributions.multivariate_normal import MultivariateNormal
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import deque
+import imageio
 
 logger = logging.getLogger(__name__)
 
@@ -131,18 +136,31 @@ class CEM():
     def _slice_control(self, t):
         return slice(t * self.nu, (t + 1) * self.nu)
 
-    def _evaluate_trajectories(self, samples, init_state):
+    def _evaluate_trajectories(self, samples, init_state, env):
         cost_total = torch.zeros(self.K, device=self.d, dtype=self.dtype)
-        state = init_state.view(1, -1).repeat(self.K, 1)
-        for t in range(self.T):
-            u = samples[:, self._slice_control(t)]
-            state = self.F(state, u)
-            cost_total += self.running_cost(state, u)
-        if self.terminal_state_cost:
-            cost_total += self.terminal_state_cost(state)
+        # state = init_state.view(1, -1).repeat(self.K, 1)
+        # for t in range(self.T):
+        #     u = samples[:, self._slice_control(t)]
+        #     state = self.F(state, u)
+        #     cost_total += self.running_cost(state, u).to(self.dtype)
+        saved_env_state = env.get_env_state()
+        saved_path_length = env.cur_path_length
+        for k in range(self.K):
+            for t in range(saved_path_length, self.T):
+                u = samples[k, self._slice_control(t)]
+                obs, _, _, _ = env.step(u.cpu().numpy().squeeze())
+                curr_state = torch.Tensor(tabletop_obs(env._get_low_dim_info())).to(self.d).unsqueeze(0)
+                cost_total += self.running_cost(curr_state, u).to(self.dtype).to(self.d)
+
+            if self.terminal_state_cost:
+                cost_total += self.terminal_state_cost(curr_state, _).to(self.dtype).to(self.d)
+            
+            env.set_env_state(saved_env_state)
+            env.cur_path_length = saved_path_length
+
         return cost_total
 
-    def _sample_top_trajectories(self, state, num_elite):
+    def _sample_top_trajectories(self, state, num_elite, env):
         # sample K action trajectories
         # in case it's singular
         self.action_distribution = MultivariateNormal(self.mean, covariance_matrix=self.cov)
@@ -150,26 +168,28 @@ class CEM():
         # bound to control maximums
         samples = self._bound_samples(samples)
 
-        cost_total = self._evaluate_trajectories(samples, state)
+        cost_total = self._evaluate_trajectories(samples, state, env)
         # select top k based on score
         top_costs, topk = torch.topk(cost_total, num_elite, largest=False, sorted=False)
         top_samples = samples[topk]
-        return top_samples
+        return top_samples, cost_total.mean()
 
-    def command(self, state, choose_best=False):
+    def command(self, state, env, choose_best=False):
         if not torch.is_tensor(state):
             state = torch.tensor(state)
         state = state.to(dtype=self.dtype, device=self.d)
 
         self.reset()
 
+        average_sampled_cost = torch.zeros(self.M)
         for m in range(self.M):
-            top_samples = self._sample_top_trajectories(state, self.num_elite)
+            top_samples, average_cost = self._sample_top_trajectories(state, self.num_elite, env)
             # fit the gaussian to those samples
             self.mean = torch.mean(top_samples, dim=0)
             self.cov = pytorch_cov(top_samples, rowvar=False)
             if torch.matrix_rank(self.cov) < self.cov.shape[0]:
                 self.cov += self.cov_reg
+            average_sampled_cost[m] = average_cost
 
         if choose_best and self.choose_best:
             top_sample = self._sample_top_trajectories(state, 1)
@@ -179,7 +199,7 @@ class CEM():
         # only apply the first action from this trajectory
         u = top_sample[0, self._slice_control(0)]
 
-        return u
+        return u, average_sampled_cost.mean()
 
 def tabletop_obs(info):
     hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
@@ -188,7 +208,7 @@ def tabletop_obs(info):
     init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
     return init_low_dim
 
-def evaluate_episode(low_dim_state, very_start, task_num):
+def evaluate_iteration(low_dim_state, very_start, task_num):
     right_to_left = low_dim_state[3:4] - very_start[3:4]
     left_to_right = -low_dim_state[3:4] + very_start[3:4]
     forward = low_dim_state[4:5] - very_start[4:5]
@@ -211,9 +231,30 @@ def evaluate_episode(low_dim_state, very_start, task_num):
     except:
         return criteria
 
-def run_cem(cem, env, retrain_dynamics, retrain_after_iter=50, iter=1000, use_gt=False, render=True, choose_best=False):
+def run_cem_metaworld(cem, env, retrain_dynamics, task_num, terminal_cost, logdir, retrain_after_iter=50, iter=1000, use_gt=False, render=True, choose_best=False):
     dataset = torch.zeros((retrain_after_iter, cem.nx + cem.nu), dtype=cem.dtype, device=cem.d)
-    total_reward = 0
+    
+    # for visualizing CEM iterations
+    logdir_iteration = os.path.join(logdir, 'iteration')
+    if not os.path.isdir(logdir_iteration):
+        os.makedirs(logdir_iteration)
+
+    iteration_reward = 0
+
+    total_successes = 0
+    total_iterations = 0
+    _, start_info = env.reset_model()
+    very_start = tabletop_obs(start_info)
+    states = []
+    actions = []
+    
+    rolling_success = deque()
+    succ_rate_history = []
+    dvd_reward_history = []
+    engineered_reward_history = []
+    average_samples_reward_history = []
+
+    all_obs = []
     for i in range(iter):
         if use_gt:
             low_dim_info = env._get_low_dim_info()
@@ -222,13 +263,91 @@ def run_cem(cem, env, retrain_dynamics, retrain_after_iter=50, iter=1000, use_gt
             state = env.get_obs().flatten()
 
         command_start = time.perf_counter()
-        action = cem.command(state, choose_best=choose_best)
+        action, average_sampled_cost = cem.command(state, env, choose_best=choose_best)
         elapsed = time.perf_counter() - command_start
-        s, r, _, _ = env.step(action.cpu().numpy())
-        total_reward += r
-        logger.debug("action taken: %.4f cost received: %.4f time taken: %.5fs", action, -r, elapsed)
+        s, _, done, low_dim_info = env.step(action.cpu().numpy())
+        states.append(s)
+        actions.append(action.cpu().numpy())
+
+        all_obs.append((s * 255).astype(np.uint8))
+        average_samples_reward_history.append(-average_sampled_cost)
+
+        r = tabletop_obs(low_dim_info)[3] - very_start[3]
+        iteration_reward += r
+        
+        logger.debug(f"{i}: state reward: {r:.6f} action taken: {action} time taken: {elapsed:.5f}s")
         if render:
             env.render()
+
+        plt.figure()
+        plt.plot([i for i in range(len(average_samples_reward_history))], average_samples_reward_history)
+        plt.xlabel('Iteration')
+        plt.ylabel('Mean Trajectory Reward')
+        plt.title(f'Mean Reward of Sampled Trajectories')
+        plt.savefig(os.path.join(logdir, 'mean_reward_sampled_traj_iteration.png'))
+        plt.close()
+        
+        if done:
+            low_dim_info = env._get_low_dim_info()
+            low_dim_state = tabletop_obs(low_dim_info)
+            succ = evaluate_iteration(low_dim_state, very_start, task_num)
+
+            states_reshape = torch.from_numpy(np.stack(states))
+            states_reshape = torch.reshape(states_reshape, (states_reshape.shape[0], -1)).unsqueeze(0).unsqueeze(0)
+            dvd_reward = -terminal_cost(states_reshape, actions).item()
+            engineered_reward = low_dim_state[3] # task 94 specific
+
+            result = 'SUCCESS' if succ else 'FAILURE'
+            total_successes += succ
+            total_iterations += 1
+            rolling_success.append(succ)
+            print(f'----------Iteration done: {result} | dvd_reward: {dvd_reward} | engineered_reward: {engineered_reward}----------')
+            print(f'----------Currently at {total_successes} / {total_iterations}----------')
+            
+            if len(rolling_success) > 10:
+                rolling_success.popleft()
+            
+            succ_rate = sum(rolling_success) / len(rolling_success)
+
+            dvd_reward_history.append(dvd_reward)
+            engineered_reward_history.append(engineered_reward)
+            succ_rate_history.append(succ_rate)
+
+            print('----------REPLOTTING----------')
+            plt.figure()
+            plt.plot([i for i in range(len(dvd_reward_history))], dvd_reward_history)
+            plt.ylim([0, 1])
+            plt.xlabel('Iteration')
+            plt.ylabel('DVD Reward')
+            plt.title('DVD Reward')
+            plt.savefig(os.path.join(logdir, 'dvd_rewards_iteration.png'))
+            plt.close()
+
+            plt.figure()
+            plt.plot([i for i in range(len(engineered_reward_history))], engineered_reward_history)
+            plt.xlabel('Iteration')
+            plt.ylabel('Engineered Reward')
+            plt.title('Engineered Reward')
+            plt.savefig(os.path.join(logdir, 'engineered_reward_iteration.png'))
+            plt.close()
+            
+            plt.figure()
+            plt.plot([i for i in range(len(succ_rate_history))], succ_rate_history)
+            plt.xlabel('Iteration')
+            plt.ylabel('Rolling Success Rate')
+            plt.title('Rolling Success Rate')
+            plt.savefig(os.path.join(logdir, 'rolling_success_rate_iteration.png'))
+            plt.close()
+
+            # store video of path
+            imageio.mimsave(os.path.join(logdir_iteration, f'iteration{total_iterations}.gif'), all_obs, fps=20)
+            
+            _, start_info = env.reset_model()
+            very_start = tabletop_obs(start_info)
+            states = []
+            actions = []
+            iteration_reward = 0
+            all_obs = []
 
         di = i % retrain_after_iter
         if di == 0 and i > 0:
@@ -237,4 +356,4 @@ def run_cem(cem, env, retrain_dynamics, retrain_after_iter=50, iter=1000, use_gt
             dataset.zero_()
         dataset[di, :cem.nx] = torch.tensor(state, dtype=cem.dtype)
         dataset[di, cem.nx:] = action
-    return total_reward, dataset
+    return total_successes, total_iterations, dataset
