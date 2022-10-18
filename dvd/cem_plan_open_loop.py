@@ -153,20 +153,21 @@ def dvd_reward(states, actions):
 
     :returns rewards: (K x 1) Tensor
     """
+    CHUNKS = 100
     command_start = time.perf_counter()
-    reward_list = []
-    batch_num = 0
-    while batch_num * 100 < states.shape[0]:
-        if (batch_num + 1) * 100 > states.shape[0]:
-            rewards_batch = inference(states[batch_num*100:], demo, video_encoder, sim_discriminator)
-        else:
-            rewards_batch = inference(states[batch_num*100:(batch_num+1)*100], demo, video_encoder, sim_discriminator)
+    rewards_demo = torch.zeros(states.shape[0])
+    for demo in demos:
+        reward_list = []
+        batch_num = 0
+        while batch_num * CHUNKS < states.shape[0]:
+            loc = slice(batch_num*CHUNKS, max((batch_num+1)*CHUNKS, states.shape[0]))
+            rewards_batch = inference(states[loc], demo, video_encoder, sim_discriminator)
+            reward_list.append(rewards_batch.cpu())
+            torch.cuda.empty_cache()
+            batch_num += 1
 
-        reward_list.append(rewards_batch.cpu())
-        torch.cuda.empty_cache()
-        batch_num += 1
-
-    rewards = torch.cat(reward_list, dim=0)
+        rewards_demo += torch.cat(reward_list, dim=0)
+    rewards = rewards_demo / len(demos)
     elapsed = time.perf_counter() - command_start
     print(f"Video similarity inference elapsed time: {elapsed:.4f}s")
 
@@ -178,7 +179,6 @@ def running_reward_engineered_94(state, action):
     drawer_move = torch.abs(state[:, 10] - very_start[10]) 
     move_faucet = state[:, 12]
 
-    # penalty = (left_to_right > 0.15).to(torch.float) * -100
     penalty = 0 if (drawer_move < 0.03 and move_faucet < 0.01) else -100
     reward = left_to_right + penalty
 
@@ -188,10 +188,8 @@ def running_reward_engineered_41(state, action):
     # task 41: pushing mug right to left
     x_shift = torch.abs(state[:, 3] - very_start[3])
     forward = -torch.abs(state[:, 4] - very_start[4] - 0.115) + 0.115
-    # drawer_move = torch.abs(state[:, 10] - very_start[10]) 
-    # move_faucet = state[:, 12]
 
-    penalty = 0 if (x_shift < 0.04) else -100
+    penalty = 0 if (x_shift < 0.05) else -100
     reward = forward + penalty
 
     return reward.to(torch.float32)
@@ -213,11 +211,19 @@ if __name__ == '__main__':
     dtype = torch.double
 
     if args.engineered_rewards:
-        terminal_reward_fn = running_reward_engineered_41
+        if args.task_id == 94:
+            terminal_reward_fn = running_reward_engineered_94
+            
+        elif args.task_id == 41:
+            terminal_reward_fn = running_reward_engineered_41
     else:
         video_encoder = load_encoder_model()
         sim_discriminator = load_discriminator_model()
-        demo = decode_gif(args.demo_path)
+        if os.path.isdir(args.demo_path):
+            all_demo_names = os.listdir(args.demo_path)
+            demos = [decode_gif(os.path.join(args.demo_path, fname)) for fname in all_demo_names]
+        else:
+            demos = [decode_gif(args.demo_path)]
         terminal_reward_fn = dvd_reward
 
     # initialization
@@ -226,7 +232,7 @@ if __name__ == '__main__':
 
     # for logging
     logdir = 'engineered_reward' if args.engineered_rewards else args.checkpoint.split('/')[1]
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop'
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop_test_2'
     logdir = os.path.join('cem_plots', logdir)
     logdir_iteration = os.path.join(logdir, 'iterations')
     if not os.path.isdir(logdir):
@@ -279,25 +285,20 @@ if __name__ == '__main__':
 
         actions_mean = elites.mean(dim=0)
         actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
-        for i in range(actions_cov.shape[0]):
-            for j in range(actions_cov.shape[1]):
-                if i != j:
-                    actions_cov[i, j] = 0
-                else:
-                    actions_cov[i, j] = max(actions_cov[i,j], 1e-8)
+        if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+            actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
 
         # follow sampled trajectory
         action_distribution = MultivariateNormal(actions_mean, actions_cov)
         traj_sample = action_distribution.sample((1,))
-        iters = 0
-        done = False
 
         # logging sampled trajectory
         all_obs = []
         if not args.engineered_rewards:
             states = np.zeros((1, TIMESTEPS, 120, 180, 3))
 
-        while not done:
+        iters = 0
+        for t in range(TIMESTEPS):
             action = traj_sample[0, iters*nu:(iters+1)*nu] # from CEM
             obs, r, done, low_dim_info = env.step(action.cpu().numpy())
             if not args.engineered_rewards:
@@ -307,10 +308,12 @@ if __name__ == '__main__':
         tend = time.perf_counter()
 
         # task 94
-        # rew = tabletop_obs(low_dim_info)[3] - very_start[3]
+        if args.task_id == 94:
+            rew = tabletop_obs(low_dim_info)[3] - very_start[3]
 
         # task 41
-        rew = tabletop_obs(low_dim_info)[4] - very_start[4]
+        elif args.task_id == 41:
+            rew = tabletop_obs(low_dim_info)[4] - very_start[4]
 
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Trajectory reward: {rew:.6f}")
 
@@ -318,12 +321,14 @@ if __name__ == '__main__':
         low_dim_state = tabletop_obs(low_dim_info)
 
         # task 94
-        # iteration_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
-        # penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
+        if args.task_id == 94:
+            iteration_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
+            penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
 
         # task 41
-        iteration_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
-        penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.04) else -100
+        elif args.task_id == 41:
+            iteration_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
+            penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
 
         iteration_reward += penalty
 
@@ -333,10 +338,12 @@ if __name__ == '__main__':
             dvd_r = 0 # NA
 
         # task 94
-        succ = iteration_reward > 0.05
+        if args.task_id == 94:
+            succ = iteration_reward > 0.05
 
         # task 41
-        succ = iteration_reward > 0.1
+        if args.task_id == 41:
+            succ = iteration_reward > 0.03
         
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
