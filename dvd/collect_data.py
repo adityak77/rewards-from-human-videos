@@ -94,7 +94,8 @@ def get_human_demos(args):
         # goals = [[-0.17, 0.55, 0], [-0, 0.6, 0], [0.1, 0.6, 0]] # correct right to left
         # goals = [[0.2, 0.55, 0], [0.2, 0.75, 0], [0.2, 0.55, 0]] # incorrect
         # goals = [[-0.17, 0.55, 0], [-0.17, 0.55, 0], [-0.17, 0.55, 0]] # partial
-        goals = [[0.17, 0.55, 0], [0, 0.6, 0], [-0.1, 0.6, 0]] # left to right
+        # goals = [[0.17, 0.55, 0], [0, 0.6, 0], [-0.1, 0.6, 0]] # left to right
+        goals = [[0, 0.55, 0], [0, 0.60, 0], [0, 0.65, 0]] # push away from camera (41)
         for i in range(args.num_traj_per_epoch):
             if args.random:
                 imgs, actions, obs = take_random_trajectory(args, env, obs)
@@ -132,7 +133,7 @@ def get_human_demos(args):
             criteria = last_obs[12] < -0.05
         elif args.task_num == 94: # move cup right to left
             criteria = left_to_right < -0.05 and drawer_move < 0.03 and move_faucet < 0.01
-        elif args.task_num == 45: # Push cup forward
+        elif args.task_num == 41: # Push cup forward
             criteria = abs(right_to_left) < 0.04 and forward > 0.1
         elif args.task_num == 46: # open drawer
             criteria = last_obs[10] < -0.08 and np.abs(right_to_left) < 0.01

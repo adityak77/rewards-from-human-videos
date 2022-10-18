@@ -31,9 +31,6 @@ import argparse
 import logging
 import pickle
 
-from pytorch_mppi.mppi_metaworld import tabletop_obs, evaluate_iteration
-
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(levelname)s %(asctime)s %(pathname)s:%(lineno)d] %(message)s',
@@ -41,14 +38,13 @@ logging.basicConfig(level=logging.DEBUG,
 logging.getLogger('matplotlib.font_manager').disabled = True
 
 
-# device = 'cpu'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--task_id", type=int, default=94, help="Task to learn a model for")
 
 # dvd model params
-parser.add_argument("--demo_path", type=str, default='data_correct/demo_sample0.gif', help='path to demo video')
+parser.add_argument("--demo_path", type=str, default='data_front/demo_sample0.gif', help='path to demo video')
 parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
 parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
 parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
@@ -150,8 +146,7 @@ def inference(states, demo, model, sim_discriminator):
 
 def dvd_reward(states, actions):
     """
-    :param states: (K x T x nx) Tensor
-    :param states: (K x T x H x W x C) Tensor
+    :param states: (K x T x H x W x C) np.ndarray
         K = batch size, T = trajectory size, nx = state embedding size
 
     :param actions: (K x T x nu) Tensor
@@ -159,13 +154,25 @@ def dvd_reward(states, actions):
     :returns rewards: (K x 1) Tensor
     """
     command_start = time.perf_counter()
-    rewards = inference(states, demo, video_encoder, sim_discriminator)
+    reward_list = []
+    batch_num = 0
+    while batch_num * 100 < states.shape[0]:
+        if (batch_num + 1) * 100 > states.shape[0]:
+            rewards_batch = inference(states[batch_num*100:], demo, video_encoder, sim_discriminator)
+        else:
+            rewards_batch = inference(states[batch_num*100:(batch_num+1)*100], demo, video_encoder, sim_discriminator)
+
+        reward_list.append(rewards_batch.cpu())
+        torch.cuda.empty_cache()
+        batch_num += 1
+
+    rewards = torch.cat(reward_list, dim=0)
     elapsed = time.perf_counter() - command_start
     print(f"Video similarity inference elapsed time: {elapsed:.4f}s")
 
     return rewards
 
-def running_reward_engineered(state, action):
+def running_reward_engineered_94(state, action):
     # task 94: pushing mug right to left
     left_to_right = -torch.abs(state[:, 3] - very_start[3] - 0.15) + 0.15
     drawer_move = torch.abs(state[:, 10] - very_start[10]) 
@@ -177,17 +184,36 @@ def running_reward_engineered(state, action):
 
     return reward.to(torch.float32)
 
+def running_reward_engineered_41(state, action):
+    # task 41: pushing mug right to left
+    x_shift = torch.abs(state[:, 3] - very_start[3])
+    forward = -torch.abs(state[:, 4] - very_start[4] - 0.115) + 0.115
+    # drawer_move = torch.abs(state[:, 10] - very_start[10]) 
+    # move_faucet = state[:, 12]
+
+    penalty = 0 if (x_shift < 0.04) else -100
+    reward = forward + penalty
+
+    return reward.to(torch.float32)
+
+def tabletop_obs(info):
+    hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
+    mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
+    mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
+    init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
+    return init_low_dim
+
 if __name__ == '__main__':
     TIMESTEPS = 51 # MPC lookahead
-    N_SAMPLES = 100
-    NUM_ELITES = 7
-    NUM_ITERATIONS = 1000
+    N_SAMPLES = 100 # 400
+    NUM_ELITES = 7 # 25
+    NUM_ITERATIONS = 100
     nu = 4
 
     dtype = torch.double
 
     if args.engineered_rewards:
-        terminal_reward_fn = running_reward_engineered
+        terminal_reward_fn = running_reward_engineered_41
     else:
         video_encoder = load_encoder_model()
         sim_discriminator = load_discriminator_model()
@@ -200,7 +226,7 @@ if __name__ == '__main__':
 
     # for logging
     logdir = 'engineered_reward' if args.engineered_rewards else args.checkpoint.split('/')[1]
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_open_loop'
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop'
     logdir = os.path.join('cem_plots', logdir)
     logdir_iteration = os.path.join(logdir, 'iterations')
     if not os.path.isdir(logdir):
@@ -279,25 +305,45 @@ if __name__ == '__main__':
             all_obs.append((obs * 255).astype(np.uint8))
             iters += 1
         tend = time.perf_counter()
-        rew = tabletop_obs(low_dim_info)[3] - very_start[3]
+
+        # task 94
+        # rew = tabletop_obs(low_dim_info)[3] - very_start[3]
+
+        # task 41
+        rew = tabletop_obs(low_dim_info)[4] - very_start[4]
+
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Trajectory reward: {rew:.6f}")
 
         # calculate success and reward of trajectory
         low_dim_state = tabletop_obs(low_dim_info)
-        iteration_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
-        penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
+
+        # task 94
+        # iteration_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
+        # penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
+
+        # task 41
+        iteration_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
+        penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.04) else -100
+
         iteration_reward += penalty
 
-        dvd_r = terminal_reward_fn(states, _).item()
+        if not args.engineered_rewards:
+            dvd_r = terminal_reward_fn(states, _).item()
+        else:
+            dvd_r = 0 # NA
 
+        # task 94
         succ = iteration_reward > 0.05
+
+        # task 41
+        succ = iteration_reward > 0.1
         
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
         total_successes += succ
         total_iterations += 1
         rolling_success.append(succ)
-        print(f'----------Iteration done: {result} | gt_reward: {iteration_reward:.5f} | dvd_reward {dvd_r}----------')
+        print(f'----------Iteration done: {result} | gt_reward: {iteration_reward:.5f} | dvd_reward {dvd_r:.5f}----------')
         print(f'----------Currently at {total_successes} / {total_iterations}----------')
         
         if len(rolling_success) > 10:
@@ -313,23 +359,25 @@ if __name__ == '__main__':
         print('----------REPLOTTING----------')
         plt.figure()
         plt.plot([i for i in range(len(iteration_reward_history))], iteration_reward_history)
-        plt.xlabel('Iteration')
+        plt.xlabel('CEM Iteration')
         plt.ylabel('Total Reward in iteration')
+        plt.title('Ground Truth Reward')
         plt.savefig(os.path.join(logdir, 'engineered_reward_iteration.png'))
         plt.close()
         
         plt.figure()
         plt.plot([i for i in range(len(succ_rate_history))], succ_rate_history)
-        plt.xlabel('Iteration')
+        plt.xlabel('CEM Iteration')
         plt.ylabel('Rolling Success Rate')
+        plt.title('Success Rate (average over last 10 iters)')
         plt.savefig(os.path.join(logdir, 'rolling_success_rate_iteration.png'))
         plt.close()
 
         plt.figure()
         plt.plot([i for i in range(len(mean_sampled_traj_history))], mean_sampled_traj_history)
-        plt.xlabel('Iteration')
+        plt.xlabel('CEM Iteration')
         plt.ylabel('Mean Sampled Trajectories Reward')
-        plt.title(f'Mean Reward of Sampled Trajectories')
+        plt.title('Mean Reward of Sampled Trajectories')
         plt.savefig(os.path.join(logdir, 'mean_reward_sampled_traj_iteration.png'))
         plt.close()
 
