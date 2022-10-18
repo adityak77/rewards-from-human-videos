@@ -194,6 +194,16 @@ def running_reward_engineered_41(state, action):
 
     return reward.to(torch.float32)
 
+def running_reward_engineered_5(state, action):
+    # task 5: closing drawer
+    right_to_left = torch.abs(state[:, 3] - very_start[3])
+    closed = state[:, 10]
+
+    penalty = 0 if right_to_left < 0.01 else -100
+    reward = closed + penalty
+
+    return reward.to(torch.float32)
+
 def tabletop_obs(info):
     hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
     mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
@@ -213,9 +223,10 @@ if __name__ == '__main__':
     if args.engineered_rewards:
         if args.task_id == 94:
             terminal_reward_fn = running_reward_engineered_94
-            
         elif args.task_id == 41:
             terminal_reward_fn = running_reward_engineered_41
+        elif args.task_id == 5:
+            terminal_reward_fn = running_reward_engineered_5
     else:
         video_encoder = load_encoder_model()
         sim_discriminator = load_discriminator_model()
@@ -232,7 +243,7 @@ if __name__ == '__main__':
 
     # for logging
     logdir = 'engineered_reward' if args.engineered_rewards else args.checkpoint.split('/')[1]
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop_test_2'
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop_3'
     logdir = os.path.join('cem_plots', logdir)
     logdir_iteration = os.path.join(logdir, 'iterations')
     if not os.path.isdir(logdir):
@@ -307,29 +318,28 @@ if __name__ == '__main__':
             iters += 1
         tend = time.perf_counter()
 
-        # task 94
         if args.task_id == 94:
             rew = tabletop_obs(low_dim_info)[3] - very_start[3]
-
-        # task 41
         elif args.task_id == 41:
             rew = tabletop_obs(low_dim_info)[4] - very_start[4]
+        elif args.task_id == 5:
+            rew = tabletop_obs(low_dim_info)[10]            
 
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Trajectory reward: {rew:.6f}")
 
         # calculate success and reward of trajectory
         low_dim_state = tabletop_obs(low_dim_info)
 
-        # task 94
         if args.task_id == 94:
             iteration_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
             penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
-
-        # task 41
         elif args.task_id == 41:
             iteration_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
             penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
-
+        elif args.task_id == 5:
+            iteration_reward = low_dim_state[10]
+            penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
+        
         iteration_reward += penalty
 
         if not args.engineered_rewards:
@@ -337,14 +347,13 @@ if __name__ == '__main__':
         else:
             dvd_r = 0 # NA
 
-        # task 94
         if args.task_id == 94:
             succ = iteration_reward > 0.05
-
-        # task 41
         if args.task_id == 41:
             succ = iteration_reward > 0.03
-        
+        elif args.task_id == 5:
+            succ = iteration_reward > -0.01
+
         # print results
         result = 'SUCCESS' if succ else 'FAILURE'
         total_successes += succ
