@@ -1,7 +1,10 @@
+from pickletools import uint8
 from multi_column import MultiColumn, SimilarityDiscriminator
 from utils import remove_module_from_checkpoint_state_dict
 from plan_utils import get_args, get_obs
 from transforms_video import *
+
+from vip import load_vip
 
 from sim_env.tabletop import Tabletop
 
@@ -41,10 +44,10 @@ logging.getLogger('matplotlib.font_manager').disabled = True
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--task_id", type=int, default=94, help="Task to learn a model for")
+parser.add_argument("--task_id", type=int, required=True, help="Task to learn a model for")
 
 # dvd model params
-parser.add_argument("--demo_path", type=str, default='data_front/demo_sample0.gif', help='path to demo video')
+parser.add_argument("--demo_path", type=str, required=True, help='path to demo video')
 parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
 parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
 parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
@@ -59,6 +62,7 @@ parser.add_argument("--xml", type=str, default='env1')
 
 # optimizer specific
 parser.add_argument("--engineered_rewards", action='store_true', default=False, help='Use hand engineered rewards or not')
+parser.add_argument("--vip", action='store_true', help='Use pretrained VIP embeddings for reward function')
 
 args = parser.parse_args()
 
@@ -173,6 +177,92 @@ def dvd_reward(states, actions):
 
     return rewards
 
+def vip_reward(states, actions):
+    """
+    :param states: (K x T x H x W x C) np.ndarray
+        K = batch size, T = trajectory size, nx = state embedding size
+
+    :param actions: (K x T x nu) Tensor
+
+    :returns rewards: (K x 1) Tensor
+    """
+    vip = load_vip().to(device)
+    vip.eval()
+
+    def preprocess(input):
+        transforms = ComposeMix([
+            [torchvision.transforms.ToPILImage(), "img"],
+            [torchvision.transforms.Resize(256), "img"],
+            [torchvision.transforms.CenterCrop(224), "img"],
+            [torchvision.transforms.ToTensor(), "img"],
+         ])
+
+        output = [(elem * 255).astype(np.uint8) for elem in input]
+        output = torch.stack(transforms(output)) # K x C x 224 x 224
+        output = (output * 255).to(torch.uint8).to(device)
+        return output
+
+    # import ipdb; ipdb.set_trace()
+    final_states = preprocess(states[:, -1, :, :, :])
+    demo_goals = preprocess([demo[-1] for demo in demos])
+
+    with torch.no_grad():
+        final_states_emb = vip(final_states)
+        demo_goals_emb = vip(demo_goals)
+
+    reward = torch.zeros(final_states_emb.shape[0])
+    for demo in demo_goals_emb:
+        reward += torch.linalg.norm(final_states_emb - demo, dim=1).cpu()
+
+    reward /= demo_goals_emb.shape[0]
+    return -reward
+
+def vip_reward_trajectory_similarity(states, actions):
+    """
+    :param states: (K x T x H x W x C) np.ndarray
+        K = batch size, T = trajectory size, nx = state embedding size
+
+    :param actions: (K x T x nu) Tensor
+
+    :returns rewards: (K x 1) Tensor
+    """
+    vip = load_vip().to(device)
+    vip.eval()
+
+    def preprocess(input):
+        transforms = ComposeMix([
+            [torchvision.transforms.ToPILImage(), "img"],
+            [torchvision.transforms.Resize(256), "img"],
+            [torchvision.transforms.CenterCrop(224), "img"],
+            [torchvision.transforms.ToTensor(), "img"],
+         ])
+
+        output = [(elem * 255).astype(np.uint8) for elem in input]
+        output = torch.stack(transforms(output)) # K x C x 224 x 224
+        output = (output * 255).to(torch.uint8).to(device)
+        return output
+
+    initial_states = preprocess(states[:, 0, :, :, :])    
+    final_states = preprocess(states[:, -1, :, :, :])
+    demo_starts = preprocess([demo[0] for demo in demos])
+    demo_goals = preprocess([demo[-1] for demo in demos])
+
+    with torch.no_grad():
+        initial_states_emb = vip(initial_states)
+        final_states_emb = vip(final_states)
+        demo_starts_emb = vip(demo_starts)
+        demo_goals_emb = vip(demo_goals)
+
+    traj_emb = final_states_emb - initial_states_emb
+    demo_traj_emb = demo_goals_emb - demo_starts_emb
+
+    reward = torch.zeros(final_states_emb.shape[0])
+    for demo in demo_traj_emb:
+        reward += torch.linalg.norm(demo - traj_emb, dim=1).cpu()
+
+    reward /= demo_goals_emb.shape[0]
+    return -reward
+
 def running_reward_engineered_94(state, action):
     # task 94: pushing mug right to left
     left_to_right = -torch.abs(state[:, 3] - very_start[3] - 0.15) + 0.15
@@ -220,6 +310,8 @@ if __name__ == '__main__':
 
     dtype = torch.double
 
+    assert not (args.engineered_rewards and args.vip)
+
     if args.engineered_rewards:
         if args.task_id == 94:
             terminal_reward_fn = running_reward_engineered_94
@@ -227,23 +319,33 @@ if __name__ == '__main__':
             terminal_reward_fn = running_reward_engineered_41
         elif args.task_id == 5:
             terminal_reward_fn = running_reward_engineered_5
+    elif args.vip:
+        terminal_reward_fn = vip_reward
     else:
         video_encoder = load_encoder_model()
         sim_discriminator = load_discriminator_model()
+        terminal_reward_fn = dvd_reward
+
+    if not args.engineered_rewards:
         if os.path.isdir(args.demo_path):
             all_demo_names = os.listdir(args.demo_path)
             demos = [decode_gif(os.path.join(args.demo_path, fname)) for fname in all_demo_names]
         else:
             demos = [decode_gif(args.demo_path)]
-        terminal_reward_fn = dvd_reward
 
     # initialization
     actions_mean = torch.zeros(TIMESTEPS * nu)
     actions_cov = torch.eye(TIMESTEPS * nu)
 
     # for logging
-    logdir = 'engineered_reward' if args.engineered_rewards else args.checkpoint.split('/')[1]
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop_3'
+    if args.engineered_rewards:
+        logdir = 'engineered_reward'
+    elif args.vip:
+        logdir = 'vip2'
+    else:
+        logdir = args.checkpoint.split('/')[1]
+    
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop_robotdemo'
     logdir = os.path.join('cem_plots', logdir)
     logdir_iteration = os.path.join(logdir, 'iterations')
     if not os.path.isdir(logdir):
@@ -359,7 +461,9 @@ if __name__ == '__main__':
         total_successes += succ
         total_iterations += 1
         rolling_success.append(succ)
-        print(f'----------Iteration done: {result} | gt_reward: {iteration_reward:.5f} | dvd_reward {dvd_r:.5f}----------')
+
+        additional_reward_type = 'vip' if args.vip else 'dvd'
+        print(f'----------Iteration done: {result} | gt_reward: {iteration_reward:.5f} | {additional_reward_type}_reward {dvd_r:.5f}----------')
         print(f'----------Currently at {total_successes} / {total_iterations}----------')
         
         if len(rolling_success) > 10:
