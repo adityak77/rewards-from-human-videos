@@ -311,6 +311,8 @@ if __name__ == '__main__':
     dtype = torch.double
 
     assert not (args.engineered_rewards and args.vip)
+    if args.demo_path.startswith('demos'):
+        assert args.demo_path.endswith(str(args.task_id))
 
     if args.engineered_rewards:
         if args.task_id == 94:
@@ -345,7 +347,7 @@ if __name__ == '__main__':
     else:
         logdir = args.checkpoint.split('/')[1]
     
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop_robotdemo'
+    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}_open_loop'
     logdir = os.path.join('cem_plots', logdir)
     logdir_iteration = os.path.join(logdir, 'iterations')
     if not os.path.isdir(logdir):

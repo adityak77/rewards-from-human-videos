@@ -243,7 +243,6 @@ class MPPI():
         saved_env_state = env.get_env_state()
         saved_path_length = env.cur_path_length
         for k in range(K):
-            curr_state = state[:, k, :]
             for t in range(saved_path_length, T):
                 u = self.u_scale * perturbed_actions[k, t].repeat(self.M, 1, 1)
                 obs, _, _, _ = env.step(u.cpu().numpy().squeeze())
@@ -263,9 +262,9 @@ class MPPI():
             env.cur_path_length = saved_path_length
 
         # action perturbation cost
-        if self.terminal_state_cost:
-            c = self.terminal_state_cost(states, actions)
-            cost_samples += c.to(self.dtype).to(cost_samples.device)
+        # if self.terminal_state_cost:
+        #     c = self.terminal_state_cost(states, actions)
+        #     cost_samples += c.to(self.dtype).to(cost_samples.device)
         cost_total += cost_samples.mean(dim=0)
         cost_total += cost_var * self.rollout_var_cost
         return cost_total, states, actions
