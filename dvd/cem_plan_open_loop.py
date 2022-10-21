@@ -63,6 +63,90 @@ parser.add_argument("--xml", type=str, default='env1')
 
 args = parser.parse_args()
 
+class CemLogger():
+    def __init__(self, logdir):
+        print(f'Logging results to {logdir}...')
+        self.logdir = logdir
+        self.logdir_iteration = os.path.join(logdir, 'iterations')
+
+        if not os.path.isdir(self.logdir):
+            os.makedirs(self.logdir)
+        if not os.path.isdir(self.logdir_iteration):
+            os.makedirs(self.logdir_iteration)
+
+        self.total_successes = 0
+        self.total_iterations = 0
+        self.rolling_success = deque()
+        self.gt_reward_history = []
+        self.succ_rate_history = []
+        self.mean_sampled_traj_history = []
+
+    def update(self, gt_reward, succ, mean_sampled_rewards, additional_reward, additional_reward_type):
+        # print results
+        self.total_successes += succ
+        self.total_iterations += 1
+        self.rolling_success.append(succ)
+
+        self._display_iteration_result(succ, gt_reward, additional_reward_type, additional_reward)
+
+        # if len(self.rolling_success) > 10:
+        #     self.rolling_success.popleft()
+        
+        succ_rate = sum(self.rolling_success) / len(self.rolling_success)
+
+        self.gt_reward_history.append(gt_reward)
+        self.succ_rate_history.append(succ_rate)
+        self.mean_sampled_traj_history.append(mean_sampled_rewards)
+
+
+    def _display_iteration_result(self, gt_reward, succ, additional_reward_type, additional_reward):
+        result = 'SUCCESS' if succ else 'FAILURE'
+        print(f'----------Iteration done: {result} | gt_reward: {gt_reward:.5f} | {additional_reward_type}_reward {additional_reward:.5f}----------')
+        print(f'----------Currently at {self.total_successes} / {self.total_iterations}----------')
+
+    def save_graphs(self, all_obs):
+        # Saving graphs of results
+
+        # ground truth rewards
+        print('----------REPLOTTING----------')
+        plt.figure()
+        plt.plot([i for i in range(len(self.gt_reward_history))], self.gt_reward_history)
+        plt.xlabel('CEM Iteration')
+        plt.ylabel('Total Reward in iteration')
+        plt.title('Ground Truth Reward')
+        plt.savefig(os.path.join(self.logdir, 'engineered_reward_iteration.png'))
+        plt.close()
+        
+        # rolling average of success rate
+        # plt.figure()
+        # plt.plot([i for i in range(len(self.succ_rate_history))], self.succ_rate_history)
+        # plt.xlabel('CEM Iteration')
+        # plt.ylabel('Rolling Success Rate')
+        # plt.title('Success Rate (average over last 10 iters)')
+        # plt.savefig(os.path.join(self.logdir, 'rolling_success_rate_iteration.png'))
+        # plt.close()
+
+        # cumulative success rate
+        plt.figure()
+        plt.plot([i for i in range(len(self.succ_rate_history))], self.succ_rate_history)
+        plt.xlabel('CEM Iteration')
+        plt.ylabel('Cumulative Success Rate')
+        plt.title('Cumulative Success Rate')
+        plt.savefig(os.path.join(self.logdir, 'cumulative_success_rate_iteration.png'))
+        plt.close()
+
+        # mean reward of sampled trajectories
+        plt.figure()
+        plt.plot([i for i in range(len(self.mean_sampled_traj_history))], self.mean_sampled_traj_history)
+        plt.xlabel('CEM Iteration')
+        plt.ylabel('Mean Sampled Trajectories Reward')
+        plt.title('Mean Reward of Sampled Trajectories')
+        plt.savefig(os.path.join(self.logdir, 'mean_reward_sampled_traj_iteration.png'))
+        plt.close()
+
+        # store video of trajectory
+        imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{ep}.gif'), all_obs, fps=20)
+
 def decode_gif(video_path):
     try: 
         reader = av.open(video_path)
@@ -375,18 +459,12 @@ if __name__ == '__main__':
     
     logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
-    logdir_iteration = os.path.join(logdir, 'iterations')
-    if not os.path.isdir(logdir):
-        os.makedirs(logdir)
-    if not os.path.isdir(logdir_iteration):
-        os.makedirs(logdir_iteration)
-
-    total_successes = 0
-    total_iterations = 0
-    rolling_success = deque()
-    gt_reward_history = []
-    succ_rate_history = []
-    mean_sampled_traj_history = []
+    run = 0
+    while os.path.isdir(logdir + f'_run{run}'):
+        run += 1
+    logdir = logdir + f'_run{run}'
+    
+    cem_logger = CemLogger(logdir)
     for ep in range(NUM_ITERATIONS):
         # env initialization
         env = Tabletop(log_freq=args.env_log_freq, 
@@ -468,52 +546,11 @@ if __name__ == '__main__':
         # calculate success and reward of trajectory
         gt_reward += penalty
         succ = gt_reward > success_threshold
-
-        # print results
-        result = 'SUCCESS' if succ else 'FAILURE'
-        total_successes += succ
-        total_iterations += 1
-        rolling_success.append(succ)
+        mean_sampled_rewards = sample_rewards.cpu().numpy().mean()
 
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Object Position Shift: {rew:.6f}")
-        print(f'----------Iteration done: {result} | gt_reward: {gt_reward:.5f} | {additional_reward_type}_reward {additional_reward:.5f}----------')
-        print(f'----------Currently at {total_successes} / {total_iterations}----------')
-        
-        if len(rolling_success) > 10:
-            rolling_success.popleft()
-        
-        succ_rate = sum(rolling_success) / len(rolling_success)
-
-        gt_reward_history.append(gt_reward)
-        succ_rate_history.append(succ_rate)
-        mean_sampled_traj_history.append(sample_rewards.cpu().numpy().mean())
+        cem_logger.update(gt_reward, succ, mean_sampled_rewards, additional_reward, additional_reward_type)
 
         # logging results
-        print('----------REPLOTTING----------')
-        plt.figure()
-        plt.plot([i for i in range(len(gt_reward_history))], gt_reward_history)
-        plt.xlabel('CEM Iteration')
-        plt.ylabel('Total Reward in iteration')
-        plt.title('Ground Truth Reward')
-        plt.savefig(os.path.join(logdir, 'engineered_reward_iteration.png'))
-        plt.close()
-        
-        plt.figure()
-        plt.plot([i for i in range(len(succ_rate_history))], succ_rate_history)
-        plt.xlabel('CEM Iteration')
-        plt.ylabel('Rolling Success Rate')
-        plt.title('Success Rate (average over last 10 iters)')
-        plt.savefig(os.path.join(logdir, 'rolling_success_rate_iteration.png'))
-        plt.close()
-
-        plt.figure()
-        plt.plot([i for i in range(len(mean_sampled_traj_history))], mean_sampled_traj_history)
-        plt.xlabel('CEM Iteration')
-        plt.ylabel('Mean Sampled Trajectories Reward')
-        plt.title('Mean Reward of Sampled Trajectories')
-        plt.savefig(os.path.join(logdir, 'mean_reward_sampled_traj_iteration.png'))
-        plt.close()
-
-        # store video of path
         all_obs = (states[0] * 255).astype(np.uint8)
-        imageio.mimsave(os.path.join(logdir_iteration, f'iteration{ep}.gif'), all_obs, fps=20)
+        cem_logger.save_graphs(all_obs)
