@@ -42,7 +42,7 @@ class CemLogger():
         self.total_iterations += 1
         self.rolling_success.append(succ)
 
-        self._display_iteration_result(succ, gt_reward, additional_reward_type, additional_reward)
+        self._display_iteration_result(gt_reward, succ, additional_reward_type, additional_reward)
 
         # if len(self.rolling_success) > 10:
         #     self.rolling_success.popleft()
@@ -227,6 +227,8 @@ def vip_reward(states, actions, **kwargs):
 
     :returns rewards: (K x 1) Tensor
     """
+    demos = kwargs['demos']
+
     vip = load_vip().to(device)
     vip.eval()
 
@@ -266,6 +268,8 @@ def vip_reward_trajectory_similarity(states, actions, **kwargs):
 
     :returns rewards: (K x 1) Tensor
     """
+    demos = kwargs['demos']
+
     vip = load_vip().to(device)
     vip.eval()
 
@@ -322,7 +326,7 @@ def reward_push_mug_left_to_right(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_push_mug_forward(state, action):
+def reward_push_mug_forward(state, action, **kwargs):
     '''
     task 41: pushing mug away from camera
     :param state: (nx) np.ndarray
@@ -340,7 +344,7 @@ def reward_push_mug_forward(state, action):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_close_drawer(state, action):
+def reward_close_drawer(state, action, **kwargs):
     '''
     task 5: closing drawer
     :param state: (K x nx) np.ndarray
