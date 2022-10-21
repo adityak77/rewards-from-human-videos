@@ -28,9 +28,6 @@ pip install -e .
 
 cd dvd/sim_envs
 pip install -e .
-
-cd pytorch_mppi
-pip install -e .
 ```
 
 ## Reproducing DVD
@@ -58,7 +55,19 @@ Using `collect_data` script above, we can generate sample trajectories in the `e
 python reward_inference.py --eval_path data/file/from/collect_data/script --demo_path path/to/demo
 ```
 
-## TODO
+Run inference with human demos on DVD tasks:
+
+```
+python cem_plan_open_loop.py --num_tasks 2 --task_id 5 --dvd --demo_path demos/task5 --checkpoint /path/to/discriminator/model
+```
+
+Run inference using ground truth (my engineered) rewards:
+
+```
+python cem_plan_open_loop.py --num_tasks 2 --task_id 5 --engineered_rewards
+```
+
+## WIP
 
 In order to run inference using DVD, we need to use Stochastic Variational Video Predictor (SV2P) from `tensor2tensor`. In order to do this, you need to register the problem `dvd/human_problem.py` first. To do this, run something like 
 
