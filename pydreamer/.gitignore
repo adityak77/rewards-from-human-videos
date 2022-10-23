@@ -1,0 +1,13 @@
+__pycache__/
+*.egg-info
+data/*
+log/
+mlruns/
+
+_*.*
+.*
+
+!__init__.py
+!.gitignore
+!.dockerignore
+!data/minerl_*.npy
