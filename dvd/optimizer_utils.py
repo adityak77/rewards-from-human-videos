@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import imageio
 import pickle
+from PIL import Image
 import time
 from collections import deque
 
@@ -233,20 +234,20 @@ def vip_reward(states, actions, **kwargs):
     vip.eval()
 
     def preprocess(input):
-        transforms = ComposeMix([
-            [torchvision.transforms.ToPILImage(), "img"],
-            [torchvision.transforms.Resize(256), "img"],
-            [torchvision.transforms.CenterCrop(224), "img"],
-            [torchvision.transforms.ToTensor(), "img"],
+        transforms = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.ToTensor(),
          ])
 
-        output = [(elem * 255).astype(np.uint8) for elem in input]
-        output = torch.stack(transforms(output)) # K x C x 224 x 224
-        output = (output * 255).to(torch.uint8).to(device)
+        output = [Image.fromarray((elem * 255).astype(np.uint8)) for elem in input]
+        output = torch.stack([transforms(elem) for elem in output]) # K x C x 224 x 224
+        output = (output * 255).to(device)
         return output
 
     final_states = preprocess(states[:, -1, :, :, :])
     demo_goals = preprocess([demo[-1] for demo in demos])
+    import ipdb; ipdb.set_trace()
 
     with torch.no_grad():
         final_states_emb = vip(final_states)
@@ -254,10 +255,10 @@ def vip_reward(states, actions, **kwargs):
 
     reward = torch.zeros(final_states_emb.shape[0])
     for demo in demo_goals_emb:
-        reward += torch.linalg.norm(final_states_emb - demo, dim=1).cpu()
+        reward -= torch.linalg.norm(final_states_emb - demo, dim=1).cpu()
 
     reward /= demo_goals_emb.shape[0]
-    return -reward
+    return reward
 
 def vip_reward_trajectory_similarity(states, actions, **kwargs):
     """

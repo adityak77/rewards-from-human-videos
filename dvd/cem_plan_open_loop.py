@@ -15,6 +15,7 @@ from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
 from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
+# from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -81,6 +82,8 @@ if __name__ == '__main__':
         assert args.demo_path is not None
         if args.demo_path.startswith('demos'):
             assert args.demo_path.endswith(str(args.task_id))
+        video_encoder = None
+        sim_discriminator = None
         terminal_reward_fn = vip_reward
 
     if not args.engineered_rewards:
