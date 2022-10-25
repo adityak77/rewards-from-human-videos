@@ -1,6 +1,7 @@
 {
   "resume": 0,
-  "gpus": "0",
+  "sim_resume": 0,
+  "gpus": "0,1",
   "use_cuda": true,
   "num_tasks": 6,
   "human_data_dir": "../smthsmth/sm/20bn-something-something-v2",
