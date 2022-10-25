@@ -195,6 +195,8 @@ class MPC(Controller):
         Returns: None.
         """
 
+        import ipdb; ipdb.set_trace()
+
         # Construct new training points and add to training set
         new_train_in, new_train_targs = [], []
         for obs, acs in zip(obs_trajs, acs_trajs):

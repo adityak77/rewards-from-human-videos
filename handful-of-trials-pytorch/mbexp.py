@@ -16,7 +16,9 @@ import env # We run this so that the env is registered
 import torch
 import numpy as np
 import random
-import tensorflow as tf
+# import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 
 def set_global_seeds(seed):
@@ -28,6 +30,7 @@ def set_global_seeds(seed):
     random.seed(seed)
 
     tf.set_random_seed(seed)
+    # tf.random.set_seed(seed)
 
 
 def main(env, ctrl_type, ctrl_args, overrides, logdir):
