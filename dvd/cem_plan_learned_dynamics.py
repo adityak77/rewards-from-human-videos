@@ -16,6 +16,8 @@ from optimizer_utils import CemLogger, decode_gif
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
 from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
+from state_dynamics_model import Dataset, nn_constructor, rollout_trajectory, train
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -59,12 +61,14 @@ if __name__ == '__main__':
     NUM_ELITES = 7
     NUM_ITERATIONS = 100
     nu = 4
+    nx = 13
 
     dtype = torch.double
 
     # only one of these reward functions allowed per run
     assert sum([args.engineered_rewards, args.dvd, args.vip]) == 1
 
+    # assigning reward functions
     if args.engineered_rewards:
         if args.task_id == 94:
             terminal_reward_fn = reward_push_mug_left_to_right
@@ -87,6 +91,12 @@ if __name__ == '__main__':
         sim_discriminator = None
         terminal_reward_fn = vip_reward
 
+    # dynamics function loading
+    if args.engineered_rewards and args.learn_dynamics_model:
+        dataset = Dataset(nx, nu)
+        model = nn_constructor()
+
+    # reading demos
     if not args.engineered_rewards:
         if os.path.isdir(args.demo_path):
             all_demo_names = os.listdir(args.demo_path)
@@ -129,27 +139,28 @@ if __name__ == '__main__':
         sample_rewards = torch.zeros(N_SAMPLES)
 
         if args.dvd or args.vip:
-            states = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
+            all_obs = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
 
         for i in range(N_SAMPLES):
             """Abstract away below"""
             env_copy = copy.deepcopy(env)
-            if not args.learn_dynamics_model:
+            if args.engineered_rewards and args.learn_dynamics_model:
+                ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)
+                final_state = rollout_trajectory(very_start, ac_seqs, model)
+            else:
                 for t in range(TIMESTEPS):
                     u = action_samples[i, t*nu:(t+1)*nu]
                     obs, _, _, env_copy_info = env_copy.step(u.cpu().numpy())
                     if args.dvd or args.vip:
-                        states[i, t] = obs
-            else:
-                pass
+                        all_obs[i, t] = obs
+                final_state = tabletop_obs(env_copy_info)
             """"Abstract away above"""
 
             if args.engineered_rewards:
-                curr_state = tabletop_obs(env_copy_info)
-                sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
+                sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
 
         if args.dvd or args.vip:
-            sample_rewards = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+            sample_rewards = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
 
         # update elites
         _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
@@ -164,23 +175,29 @@ if __name__ == '__main__':
         action_distribution = MultivariateNormal(actions_mean, actions_cov)
         traj_sample = action_distribution.sample((1,))
 
-        states = np.zeros((1, TIMESTEPS, 120, 180, 3))
+        all_obs = np.zeros((1, TIMESTEPS, 120, 180, 3))
 
-        """Abstract away below"""
-        if not args.learn_dynamics_model:
-            for t in range(TIMESTEPS):
-                action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
-                obs, r, done, low_dim_info = env.step(action.cpu().numpy())
-                states[0, t] = obs
-        else:
-            pass
-        """Abstract away above"""
+        states = np.zeros((TIMESTEPS+1, nx))
+        actions = np.zeros((TIMESTEPS, nu))
+        states[0] = very_start
+        for t in range(TIMESTEPS):
+            action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
+            obs, r, done, low_dim_info = env.step(action.cpu().numpy())
+            all_obs[0, t] = obs
+
+            states[t+1, :] = tabletop_obs(low_dim_info)
+            actions[t, :] = action.cpu().numpy()
+
+        # add data to dataset and training model
+        dataset.add(states, actions)
+        train(model, dataset)
+
         tend = time.perf_counter()
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
         if not args.engineered_rewards:
-            additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         else:
             additional_reward = 0 # NA
 
@@ -211,5 +228,5 @@ if __name__ == '__main__':
         cem_logger.update(gt_reward, succ, mean_sampled_rewards, additional_reward, additional_reward_type)
 
         # logging results
-        all_obs = (states[0] * 255).astype(np.uint8)
+        all_obs = (all_obs[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)

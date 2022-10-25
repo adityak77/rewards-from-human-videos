@@ -195,8 +195,6 @@ class MPC(Controller):
         Returns: None.
         """
 
-        import ipdb; ipdb.set_trace()
-
         # Construct new training points and add to training set
         new_train_in, new_train_targs = [], []
         for obs, acs in zip(obs_trajs, acs_trajs):
@@ -321,7 +319,6 @@ class MPC(Controller):
     
     @torch.no_grad()
     def _compile_cost(self, ac_seqs):
-
         nopt = ac_seqs.shape[0]
 
         ac_seqs = torch.from_numpy(ac_seqs).float().to(TORCH_DEVICE)
