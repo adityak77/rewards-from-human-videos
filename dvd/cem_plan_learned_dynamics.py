@@ -1,5 +1,6 @@
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import os
 import numpy as np
 from torch import nn as nn
@@ -59,7 +60,7 @@ if __name__ == '__main__':
     TIMESTEPS = 51 # MPC lookahead - max length of episode
     N_SAMPLES = 100
     NUM_ELITES = 7
-    NUM_ITERATIONS = 100
+    NUM_ITERATIONS = 1000
     nu = 4
     nx = 13
 
@@ -96,6 +97,35 @@ if __name__ == '__main__':
         dataset = Dataset(nx, nu)
         model = nn_constructor()
 
+        # need to perform some initial rollouts before training
+        ac_lb = -np.ones(nu)
+        ac_ub = np.ones(nu)
+        pretrain_iters = 50
+        print(f'Rolling out {pretrain_iters} iterations before CEM for dynamics training...')
+        for _ in range(pretrain_iters):
+            # env initialization
+            env = Tabletop(log_freq=args.env_log_freq, 
+                        filepath=args.log_dir + '/env',
+                        xml=args.xml,
+                        verbose=args.verbose)  # bypass the default TimeLimit wrapper
+            _, start_info = env.reset_model()
+            very_start = tabletop_obs(start_info)
+
+            states = np.zeros((TIMESTEPS+1, nx))
+            actions = np.zeros((TIMESTEPS, nu))
+            states[0] = very_start
+            for t in range(TIMESTEPS):
+                action = np.random.uniform(ac_lb, ac_ub, nu)
+                _, _, _, low_dim_info = env.step(action)
+
+                states[t+1, :] = tabletop_obs(low_dim_info)
+                actions[t, :] = action
+
+            dataset.add(states, actions)
+
+        train(model, dataset)
+
+
     # reading demos
     if not args.engineered_rewards:
         if os.path.isdir(args.demo_path):
@@ -124,6 +154,7 @@ if __name__ == '__main__':
     logdir = logdir + f'_run{run}'
     
     cem_logger = CemLogger(logdir)
+    average_losses_list = []
     for ep in range(NUM_ITERATIONS):
         # env initialization
         env = Tabletop(log_freq=args.env_log_freq, 
@@ -145,11 +176,8 @@ if __name__ == '__main__':
             """Abstract away below"""
             env_copy = copy.deepcopy(env)
             if args.engineered_rewards and args.learn_dynamics_model:
-                if ep == 0: # need to perform at least one initial rollout before training
-                    final_state = np.random.rand(very_start.shape[0])
-                else:
-                    ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)
-                    final_state = rollout_trajectory(very_start, ac_seqs, model)
+                ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)
+                final_state = rollout_trajectory(very_start, ac_seqs, model)
             else:
                 for t in range(TIMESTEPS):
                     u = action_samples[i, t*nu:(t+1)*nu]
@@ -157,11 +185,10 @@ if __name__ == '__main__':
                     if args.dvd or args.vip:
                         all_obs[i, t] = obs
                 final_state = tabletop_obs(env_copy_info)
-                # print(np.min(final_state), np.max(final_state))
             """"Abstract away above"""
 
             if args.engineered_rewards:
-                if ep > 0 and args.learn_dynamics_model:
+                if args.learn_dynamics_model:
                     # take mean reward over particles final state
                     particle_rewards = torch.zeros(final_state.shape[0])
                     for j in range(final_state.shape[0]):
@@ -202,7 +229,8 @@ if __name__ == '__main__':
         # add data to dataset and training model
         if args.learn_dynamics_model and args.engineered_rewards:
             dataset.add(states, actions)
-            train(model, dataset)
+            average_losses = train(model, dataset)
+            average_losses_list.append(average_losses)
 
         tend = time.perf_counter()
 
@@ -242,3 +270,12 @@ if __name__ == '__main__':
         # logging results
         all_obs = (all_obs[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
+
+        # Model MSE Loss
+        plt.figure()
+        plt.plot([i for i in range(len(average_losses_list))], average_losses_list)
+        plt.xlabel('CEM Iteration')
+        plt.ylabel('Dynamics Model MSE Loss')
+        plt.title('Average MSE Loss across network ensemble')
+        plt.savefig(os.path.join(cem_logger.logdir, 'dynamics_model_loss.png'))
+        plt.close()

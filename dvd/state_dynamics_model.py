@@ -181,8 +181,9 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
 
     epoch_range = trange(EPOCHS, unit="epoch(s)", desc="Network training")
     num_batch = int(np.ceil(idxs.shape[-1] / batch_size))
+    mse_losses_list = np.zeros(EPOCHS)
 
-    for _ in epoch_range:
+    for ep in epoch_range:
 
         for batch_num in range(num_batch):
             batch_idxs = idxs[:, batch_num * batch_size : (batch_num + 1) * batch_size]
@@ -220,6 +221,9 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
         epoch_range.set_postfix({
             "Training loss(es)": mse_losses.detach().cpu().numpy()
         })
+        mse_losses_list[ep] = mse_losses.mean().detach().cpu().item()
+
+    return mse_losses_list.mean()
 
 @torch.no_grad()
 def rollout_trajectory(init_state, ac_seqs, model):
@@ -239,7 +243,7 @@ def rollout_trajectory(init_state, ac_seqs, model):
         cur_acs = ac_seqs[t]
         cur_obs = _predict_next_obs(cur_obs, cur_acs, model)
 
-    # print(t, ':', torch.isnan(cur_obs.view(-1)).sum().item())
+    print(t, ':', torch.isnan(cur_obs.view(-1)).sum().item())
 
     return cur_obs.cpu().numpy()
 
