@@ -116,7 +116,7 @@ if __name__ == '__main__':
     elif args.vip:
         logdir = 'vip2'
     
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
+    logdir = 'state_dynamics_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
     run = 0
     while os.path.isdir(logdir + f'_run{run}'):
@@ -145,8 +145,11 @@ if __name__ == '__main__':
             """Abstract away below"""
             env_copy = copy.deepcopy(env)
             if args.engineered_rewards and args.learn_dynamics_model:
-                ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)
-                final_state = rollout_trajectory(very_start, ac_seqs, model)
+                if ep == 0: # need to perform at least one initial rollout before training
+                    final_state = np.random.rand(very_start.shape[0])
+                else:
+                    ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)
+                    final_state = rollout_trajectory(very_start, ac_seqs, model)
             else:
                 for t in range(TIMESTEPS):
                     u = action_samples[i, t*nu:(t+1)*nu]
@@ -154,10 +157,18 @@ if __name__ == '__main__':
                     if args.dvd or args.vip:
                         all_obs[i, t] = obs
                 final_state = tabletop_obs(env_copy_info)
+                # print(np.min(final_state), np.max(final_state))
             """"Abstract away above"""
 
             if args.engineered_rewards:
-                sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
+                if ep > 0 and args.learn_dynamics_model:
+                    # take mean reward over particles final state
+                    particle_rewards = torch.zeros(final_state.shape[0])
+                    for j in range(final_state.shape[0]):
+                        particle_rewards[j] = terminal_reward_fn(final_state[j], _, very_start=very_start)
+                    sample_rewards[i] = particle_rewards.mean() 
+                else:
+                    sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
 
         if args.dvd or args.vip:
             sample_rewards = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
@@ -189,8 +200,9 @@ if __name__ == '__main__':
             actions[t, :] = action.cpu().numpy()
 
         # add data to dataset and training model
-        dataset.add(states, actions)
-        train(model, dataset)
+        if args.learn_dynamics_model and args.engineered_rewards:
+            dataset.add(states, actions)
+            train(model, dataset)
 
         tend = time.perf_counter()
 

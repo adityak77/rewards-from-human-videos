@@ -174,7 +174,7 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
     # self.has_been_trained = True
 
     # Train the pytorch model
-    inputs, targets = dataset.get_input_targets()
+    inputs, targets = dataset.get_inputs_targets()
     model.fit_input_stats(inputs)
 
     idxs = np.random.randint(inputs.shape[0], size=[model.num_nets, inputs.shape[0]])
@@ -225,10 +225,10 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
 def rollout_trajectory(init_state, ac_seqs, model):
     """
     :param init_state np.ndarray (nx,)
-    :param ac_seqs np.ndarray (T, nu)
+    :param ac_seqs torch.Tensor (T, nu)
     """
-    ac_seqs = torch.from_numpy(ac_seqs).float().to(TORCH_DEVICE)
-    expanded = np.expand_dims(ac_seqs, axis=1)
+    ac_seqs = ac_seqs.float().to(TORCH_DEVICE)
+    expanded = ac_seqs.unsqueeze(1)
     ac_seqs = expanded.expand(-1, NPART, -1) # T x NPART x nu
 
     cur_obs = torch.from_numpy(init_state).float().to(TORCH_DEVICE)
@@ -239,7 +239,9 @@ def rollout_trajectory(init_state, ac_seqs, model):
         cur_acs = ac_seqs[t]
         cur_obs = _predict_next_obs(cur_obs, cur_acs, model)
 
-    return cur_obs
+    # print(t, ':', torch.isnan(cur_obs.view(-1)).sum().item())
+
+    return cur_obs.cpu().numpy()
 
 def _predict_next_obs(obs, acs, model):
     proc_obs = obs # self.obs_preproc(obs)

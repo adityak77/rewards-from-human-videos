@@ -30,7 +30,6 @@ def set_global_seeds(seed):
     random.seed(seed)
 
     tf.set_random_seed(seed)
-    # tf.random.set_seed(seed)
 
 
 def main(env, ctrl_type, ctrl_args, overrides, logdir):

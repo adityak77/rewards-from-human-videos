@@ -247,7 +247,6 @@ def vip_reward(states, actions, **kwargs):
 
     final_states = preprocess(states[:, -1, :, :, :])
     demo_goals = preprocess([demo[-1] for demo in demos])
-    import ipdb; ipdb.set_trace()
 
     with torch.no_grad():
         final_states_emb = vip(final_states)
@@ -325,6 +324,10 @@ def reward_push_mug_left_to_right(state, action, **kwargs):
     penalty = 0 if (drawer_move < 0.03 and move_faucet < 0.01) else -100
     reward = left_to_right + penalty
 
+    # for bad dynamics model
+    if torch.isnan(torch.tensor([reward])):
+        reward = -1e6
+
     return torch.Tensor([reward]).to(torch.float32)
 
 def reward_push_mug_forward(state, action, **kwargs):
@@ -343,6 +346,10 @@ def reward_push_mug_forward(state, action, **kwargs):
     penalty = 0 if (x_shift < 0.05) else -100
     reward = forward + penalty
 
+    # for bad dynamics model
+    if torch.isnan(torch.tensor([reward])):
+        reward = -1e6
+
     return torch.Tensor([reward]).to(torch.float32)
 
 def reward_close_drawer(state, action, **kwargs):
@@ -360,6 +367,10 @@ def reward_close_drawer(state, action, **kwargs):
 
     penalty = 0 if right_to_left < 0.01 else -100
     reward = closed + penalty
+
+    # for bad dynamics model
+    if torch.isnan(torch.tensor([reward])):
+        reward = -1e6
 
     return torch.Tensor([reward]).to(torch.float32)
 
