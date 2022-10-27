@@ -203,6 +203,7 @@ class MPC(Controller):
         self.train_in = np.concatenate([self.train_in] + new_train_in, axis=0)
         self.train_targs = np.concatenate([self.train_targs] + new_train_targs, axis=0)
 
+        import ipdb; ipdb.set_trace()
         # Train the model
         self.has_been_trained = True
 

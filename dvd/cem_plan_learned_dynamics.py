@@ -100,9 +100,9 @@ if __name__ == '__main__':
         # need to perform some initial rollouts before training
         ac_lb = -np.ones(nu)
         ac_ub = np.ones(nu)
-        pretrain_iters = 50
+        pretrain_iters = 10
         print(f'Rolling out {pretrain_iters} iterations before CEM for dynamics training...')
-        for _ in range(pretrain_iters):
+        for iter in range(pretrain_iters):
             # env initialization
             env = Tabletop(log_freq=args.env_log_freq, 
                         filepath=args.log_dir + '/env',
@@ -122,9 +122,9 @@ if __name__ == '__main__':
                 actions[t, :] = action
 
             dataset.add(states, actions)
-
-        train(model, dataset)
-
+        
+        for _ in range(10):
+            train(model, dataset)
 
     # reading demos
     if not args.engineered_rewards:
@@ -197,6 +197,8 @@ if __name__ == '__main__':
                 else:
                     sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
 
+        print('sample_rewards', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
+
         if args.dvd or args.vip:
             sample_rewards = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
 
@@ -225,6 +227,10 @@ if __name__ == '__main__':
 
             states[t+1, :] = tabletop_obs(low_dim_info)
             actions[t, :] = action.cpu().numpy()
+
+        # import ipdb; ipdb.set_trace()
+        outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
+        print('MSE', ((outputs - states[-1, :]) ** 2).mean() / ((very_start - states[-1, :]) ** 2).mean())
 
         # add data to dataset and training model
         if args.learn_dynamics_model and args.engineered_rewards:
