@@ -123,8 +123,9 @@ if __name__ == '__main__':
 
             dataset.add(states, actions)
         
-        for _ in range(10):
-            train(model, dataset)
+        model.fit_input_stats(dataset.get_inputs_targets()[0])
+        # for _ in range(10):
+        #     train(model, dataset)
 
     # reading demos
     if not args.engineered_rewards:
@@ -180,8 +181,8 @@ if __name__ == '__main__':
                 final_state = rollout_trajectory(very_start, ac_seqs, model)
             else:
                 for t in range(TIMESTEPS):
-                    u = action_samples[i, t*nu:(t+1)*nu]
-                    obs, _, _, env_copy_info = env_copy.step(u.cpu().numpy())
+                    u = action_samples[i, t*nu:(t+1)*nu].cpu().numpy()
+                    obs, _, _, env_copy_info = env_copy.step(u)
                     if args.dvd or args.vip:
                         all_obs[i, t] = obs
                 final_state = tabletop_obs(env_copy_info)
@@ -219,17 +220,14 @@ if __name__ == '__main__':
 
         states = np.zeros((TIMESTEPS+1, nx))
         actions = np.zeros((TIMESTEPS, nu))
-        for i in range(TIMESTEPS):
-            actions[i, 3] = 1 if ep % 2 == 0 else -1
         states[0] = very_start
         for t in range(TIMESTEPS):
-            # action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
-            action = actions[t]
+            action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
             obs, r, done, low_dim_info = env.step(action)
             all_obs[0, t] = obs
 
             states[t+1, :] = tabletop_obs(low_dim_info)
-            # actions[t, :] = action.cpu().numpy()
+            actions[t, :] = action
 
         # import ipdb; ipdb.set_trace()
         outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
