@@ -17,7 +17,7 @@ from optimizer_utils import CemLogger, decode_gif
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
 from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
-from state_dynamics_model import Dataset, nn_constructor, rollout_trajectory, train
+from state_dynamics_model import Dataset, nn_constructor, rollout_trajectory, train #, _no_grad_trunc_normal
 
 
 logger = logging.getLogger(__name__)
@@ -219,18 +219,23 @@ if __name__ == '__main__':
 
         states = np.zeros((TIMESTEPS+1, nx))
         actions = np.zeros((TIMESTEPS, nu))
+        for i in range(TIMESTEPS):
+            actions[i, 3] = 1 if ep % 2 == 0 else -1
         states[0] = very_start
         for t in range(TIMESTEPS):
-            action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
-            obs, r, done, low_dim_info = env.step(action.cpu().numpy())
+            # action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
+            action = actions[t]
+            obs, r, done, low_dim_info = env.step(action)
             all_obs[0, t] = obs
 
             states[t+1, :] = tabletop_obs(low_dim_info)
-            actions[t, :] = action.cpu().numpy()
+            # actions[t, :] = action.cpu().numpy()
 
         # import ipdb; ipdb.set_trace()
         outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
-        print('MSE', ((outputs - states[-1, :]) ** 2).mean() / ((very_start - states[-1, :]) ** 2).mean())
+        mse_frac = ((outputs - states[-1, :]) ** 2).mean() / ((very_start - states[-1, :]) ** 2).mean()
+        print('MSE fraction of start', mse_frac)
+        # import ipdb; ipdb.set_trace()
 
         # add data to dataset and training model
         if args.learn_dynamics_model and args.engineered_rewards:
@@ -284,4 +289,17 @@ if __name__ == '__main__':
         plt.ylabel('Dynamics Model MSE Loss')
         plt.title('Average MSE Loss across network ensemble')
         plt.savefig(os.path.join(cem_logger.logdir, 'dynamics_model_loss.png'))
+        plt.close()
+
+        # log actions
+        plt.figure()
+        plt.plot([i for i in range(actions.shape[0])], actions.T[0], label='ind0')
+        plt.plot([i for i in range(actions.shape[0])], actions.T[1], label='ind1')
+        plt.plot([i for i in range(actions.shape[0])], actions.T[2], label='ind2')
+        plt.plot([i for i in range(actions.shape[0])], actions.T[3], label='ind3')
+        plt.xlabel('Step')
+        plt.ylabel('Action values')
+        plt.title(f'Action values in episode {ep}')
+        plt.legend()
+        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'actions{ep}.png'))
         plt.close()

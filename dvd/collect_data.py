@@ -75,6 +75,8 @@ def get_human_demos(args):
         eps_obs = []
         eps_next = []
         eps_act = []
+        eps_states = []
+        eps_low_dim_all = []
         start = time.time()
 
         obs, env_info = env.reset_model()
@@ -96,7 +98,8 @@ def get_human_demos(args):
         # goals = [[-0.17, 0.55, 0], [-0.17, 0.55, 0], [-0.17, 0.55, 0]] # partial
         # goals = [[0.17, 0.55, 0], [0, 0.6, 0], [-0.1, 0.6, 0]] # left to right
         # goals = [[0, 0.55, 0], [0, 0.60, 0], [0, 0.65, 0]] # push away from camera (41)
-        goals = [[0.2, 0.55, 0], [0.2, 0.60, 0], [0.2, 0.65, 0]]
+        goals = [[0.2, 0.55, 0], [0.2, 0.60, 0], [0.2, 0.65, 0]] # close drawer (5)
+        # goals = [[0, 0.55, 0], [0, 0.55, 0], [0, 0.55, 0]] # do nothing
         for i in range(args.num_traj_per_epoch):
             if args.random:
                 imgs, actions, obs = take_random_trajectory(args, env, obs)
@@ -108,6 +111,9 @@ def get_human_demos(args):
             eps_obs.append(imgs[:-1])
             eps_next.append(imgs[1:])
             eps_act.append(actions)
+            # import ipdb; ipdb.set_trace()
+            eps_states.append(env.data.mocap_pos[0])
+            eps_low_dim_all.append([env_info['hand_x'], env_info['hand_y'], env_info['hand_z']])
 
         low_dim_state = get_obs(args, env_info)
         eps_low_dim.append(low_dim_state)
@@ -160,6 +166,24 @@ def get_human_demos(args):
                         )
             total_good += 1
         end = time.time()
+        eps_states = np.array(eps_states).T
+        eps_low_dim_all = np.array(eps_low_dim_all).T
+        print('eps_states', eps_states)
+        print('eps_low_dim', eps_low_dim_all)
+        plt.figure()
+        plt.plot([i for i in range(len(eps_states))], eps_states[0], label='mocap_pos0')
+        plt.plot([i for i in range(len(eps_states))], eps_states[1], label='mocap_pos1')
+        plt.plot([i for i in range(len(eps_states))], eps_states[2], label='mocap_pos2')
+        plt.plot([i for i in range(len(eps_low_dim_all))], eps_low_dim_all[0], label='eef0')
+        plt.plot([i for i in range(len(eps_low_dim_all))], eps_low_dim_all[1], label='eef1')
+        plt.plot([i for i in range(len(eps_low_dim_all))], eps_low_dim_all[2], label='eef2')
+        plt.xlabel('Step')
+        plt.ylabel('State position')
+        plt.title('State position')
+        plt.legend()
+        plt.savefig(os.path.join(args.log_dir, f'eps{eps}.png'))
+        plt.close()
+
         print("===== EPISODE {} TRY {} FINISHED IN {}s =====".format(total_good, eps, end - start))
         if total_good == args.num_epochs:
             assert(False)
