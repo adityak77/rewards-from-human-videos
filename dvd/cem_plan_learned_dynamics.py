@@ -8,6 +8,7 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
 import copy
+import imageio
 
 import argparse
 import logging
@@ -230,6 +231,17 @@ if __name__ == '__main__':
             states[t+1, :] = tabletop_obs(low_dim_info)
             actions[t, :] = action
 
+        # replay the environment
+        env_replay = Tabletop(log_freq=args.env_log_freq, 
+                    filepath=args.log_dir + '/env',
+                    xml=args.xml,
+                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
+        _, start_info = env_replay.reset_model()
+        all_obs_replay = np.zeros((TIMESTEPS, 120, 180, 3))
+        for t in range(TIMESTEPS):
+            obs, _, _, _ = env_replay.step(actions[t])
+            all_obs_replay[t] = obs
+
         if args.engineered_rewards and args.learn_dynamics_model:
             # import ipdb; ipdb.set_trace()
             outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
@@ -282,6 +294,10 @@ if __name__ == '__main__':
         all_obs = (all_obs[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
 
+        all_obs_replay = (all_obs_replay * 255).astype(np.uint8)
+        # store video of trajectory
+        imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'replay{cem_logger.total_iterations}.gif'), all_obs_replay, fps=20)
+
         if args.learn_dynamics_model and args.engineered_rewards:
             # Model MSE Loss
             plt.figure()
@@ -292,15 +308,48 @@ if __name__ == '__main__':
             plt.savefig(os.path.join(cem_logger.logdir, 'dynamics_model_loss.png'))
             plt.close()
 
-        # log actions
+        # # log actions
+        # plt.figure()
+        # plt.plot([i for i in range(actions.shape[0])], actions.T[0], label='ind0')
+        # plt.plot([i for i in range(actions.shape[0])], actions.T[1], label='ind1')
+        # plt.plot([i for i in range(actions.shape[0])], actions.T[2], label='ind2')
+        # plt.xlabel('Step')
+        # plt.ylabel('Action values')
+        # plt.title(f'Action values in episode {ep}')
+        # plt.legend()
+        # plt.savefig(os.path.join(cem_logger.logdir_iteration, f'actions{ep}.png'))
+        # plt.close()
+
+        # log states
         plt.figure()
-        plt.plot([i for i in range(actions.shape[0])], actions.T[0], label='ind0')
-        plt.plot([i for i in range(actions.shape[0])], actions.T[1], label='ind1')
-        plt.plot([i for i in range(actions.shape[0])], actions.T[2], label='ind2')
-        plt.plot([i for i in range(actions.shape[0])], actions.T[3], label='ind3')
+        plt.plot([i for i in range(states.shape[0])], states.T[0], label='hand_x')
+        plt.plot([i for i in range(states.shape[0])], states.T[1], label='hand_y')
+        plt.plot([i for i in range(states.shape[0])], states.T[2], label='hand_z')
         plt.xlabel('Step')
-        plt.ylabel('Action values')
-        plt.title(f'Action values in episode {ep}')
+        plt.ylabel('EEF state values')
+        plt.title(f'EEF states in episode {ep}')
         plt.legend()
-        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'actions{ep}.png'))
+        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'states{ep}.png'))
+        plt.close()
+
+        # log X
+        plt.figure()
+        plt.plot([i for i in range(actions.shape[0])], actions.T[0], label='action')
+        plt.plot([i for i in range(states.shape[0])], states.T[0], label='state')
+        plt.xlabel('Step')
+        plt.ylabel('X values')
+        plt.title(f'X state + action values in episode {ep}')
+        plt.legend()
+        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'sa_x{ep}.png'))
+        plt.close()
+
+        # log Y
+        plt.figure()
+        plt.plot([i for i in range(actions.shape[0])], actions.T[1], label='action')
+        plt.plot([i for i in range(states.shape[0])], states.T[1], label='state')
+        plt.xlabel('Step')
+        plt.ylabel('Y values')
+        plt.title(f'Y state + action values in episode {ep}')
+        plt.legend()
+        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'sa_y{ep}.png'))
         plt.close()
