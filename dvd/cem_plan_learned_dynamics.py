@@ -16,6 +16,7 @@ from optimizer_utils import CemLogger, decode_gif
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
 from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
+from state_dynamics_model import Dataset, get_vanilla_dynamics_model, train, rollout_trajectory
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -58,12 +59,20 @@ if __name__ == '__main__':
     N_SAMPLES = 100
     NUM_ELITES = 7
     NUM_ITERATIONS = 100
+    nx = 13
     nu = 4
+
+    ac_lb = np.array([-1, -1, -1, -3])
+    ac_ub = np.array([1, 1, 1, 3])
+    BOOTSTRAP_ITERS = 20
 
     dtype = torch.double
 
     # only one of these reward functions allowed per run
     assert sum([args.engineered_rewards, args.dvd, args.vip]) == 1
+
+    if args.learn_dynamics_model:
+        assert args.engineered_rewards
 
     if args.engineered_rewards:
         if args.task_id == 94:
@@ -94,6 +103,30 @@ if __name__ == '__main__':
         else:
             demos = [decode_gif(args.demo_path)]
 
+    # boostrap dataset for model training
+    if args.learn_dynamics_model:
+        model = get_vanilla_dynamics_model()
+        dataset = Dataset(nx, nu, ac_lb, ac_ub)
+        for iter in range(BOOTSTRAP_ITERS):
+            env = Tabletop(log_freq=args.env_log_freq, 
+                            filepath=args.log_dir + '/env',
+                            xml=args.xml,
+                            verbose=args.verbose)  # bypass the default TimeLimit wrapper
+            _, start_info = env.reset_model()
+            very_start = tabletop_obs(start_info)
+                
+            acs_seq = np.random.uniform(ac_lb, ac_ub, (TIMESTEPS, nu))
+            generated_states = np.zeros((TIMESTEPS+1, nx))
+            generated_states[0] = very_start
+            for t in range(TIMESTEPS):
+                _, _, _, low_dim_info = env.step(acs_seq[t])
+                generated_states[t+1, :] = tabletop_obs(low_dim_info)
+
+            dataset.add(generated_states, acs_seq)
+            loss = train(model, dataset)
+
+            print(f'Bootstrap Loss {iter}: {loss:.7f}')
+
     # initialization
     actions_mean = torch.zeros(TIMESTEPS * nu)
     actions_cov = torch.eye(TIMESTEPS * nu)
@@ -106,7 +139,7 @@ if __name__ == '__main__':
     elif args.vip:
         logdir = 'vip2'
     
-    logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
+    logdir = 'state_dynamics_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
     run = 0
     while os.path.isdir(logdir + f'_run{run}'):
@@ -125,7 +158,7 @@ if __name__ == '__main__':
 
         tstart = time.perf_counter()
         action_distribution = MultivariateNormal(actions_mean, actions_cov)
-        action_samples = action_distribution.sample((N_SAMPLES,))
+        action_samples = action_distribution.sample((N_SAMPLES,)).cpu().numpy()
         sample_rewards = torch.zeros(N_SAMPLES)
 
         if args.dvd or args.vip:
@@ -137,13 +170,18 @@ if __name__ == '__main__':
             if not args.learn_dynamics_model:
                 for t in range(TIMESTEPS):
                     u = action_samples[i, t*nu:(t+1)*nu]
-                    obs, _, _, env_copy_info = env_copy.step(u.cpu().numpy())
+                    obs, _, _, env_copy_info = env_copy.step(u)
                     if args.dvd or args.vip:
                         states[i, t] = obs
             else:
-                pass
+                with torch.no_grad():
+                    init_state = copy.deepcopy(very_start)
+                    acs_seq = action_samples[i].reshape(TIMESTEPS, nu)
+                    env_copy_info = rollout_trajectory(init_state, acs_seq, model).cpu().numpy()
             """"Abstract away above"""
 
+            if args.learn_dynamics_model:
+                sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
             if args.engineered_rewards:
                 curr_state = tabletop_obs(env_copy_info)
                 sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
@@ -155,8 +193,8 @@ if __name__ == '__main__':
         _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
         elites = action_samples[best_inds]
 
-        actions_mean = elites.mean(dim=0)
-        actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
+        actions_mean = torch.tensor(elites).mean(dim=0)
+        actions_cov = torch.Tensor(np.cov(elites.T))
         if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
             actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
 
@@ -167,13 +205,21 @@ if __name__ == '__main__':
         states = np.zeros((1, TIMESTEPS, 120, 180, 3))
 
         """Abstract away below"""
-        if not args.learn_dynamics_model:
-            for t in range(TIMESTEPS):
-                action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
-                obs, r, done, low_dim_info = env.step(action.cpu().numpy())
-                states[0, t] = obs
-        else:
-            pass
+        generated_states = np.zeros((TIMESTEPS+1, nx))
+        generated_states[0] = very_start
+
+        for t in range(TIMESTEPS):
+            action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
+            obs, r, done, low_dim_info = env.step(action.cpu().numpy())
+            states[0, t] = obs
+            generated_states[t+1, :] = tabletop_obs(low_dim_info)
+        
+        if args.learn_dynamics_model:
+            ac_seqs = traj_sample.cpu().numpy().reshape(TIMESTEPS, nu)
+            dataset.add(generated_states, acs_seq)
+            if ep % 5 == 0:
+                loss = train(model, dataset)
+                print(f'Train Loss {ep}: {loss:.7f}')
         """Abstract away above"""
         tend = time.perf_counter()
 
