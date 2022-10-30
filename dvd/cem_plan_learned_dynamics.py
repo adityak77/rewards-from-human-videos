@@ -221,6 +221,7 @@ if __name__ == '__main__':
         states = np.zeros((TIMESTEPS+1, nx))
         actions = np.zeros((TIMESTEPS, nu))
         states[0] = very_start
+        # import ipdb; ipdb.set_trace()
         for t in range(TIMESTEPS):
             action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
             obs, r, done, low_dim_info = env.step(action)
@@ -229,11 +230,12 @@ if __name__ == '__main__':
             states[t+1, :] = tabletop_obs(low_dim_info)
             actions[t, :] = action
 
-        # import ipdb; ipdb.set_trace()
-        outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
-        mse_frac = ((outputs - states[-1, :]) ** 2).mean() / ((very_start - states[-1, :]) ** 2).mean()
-        print('MSE fraction of start', mse_frac)
-        # import ipdb; ipdb.set_trace()
+        if args.engineered_rewards and args.learn_dynamics_model:
+            # import ipdb; ipdb.set_trace()
+            outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
+            mse_frac = ((outputs - states[-1, :]) ** 2).mean() / ((very_start - states[-1, :]) ** 2).mean()
+            print('MSE fraction of start', mse_frac)
+            # import ipdb; ipdb.set_trace()
 
         # add data to dataset and training model
         if args.learn_dynamics_model and args.engineered_rewards:
@@ -280,14 +282,15 @@ if __name__ == '__main__':
         all_obs = (all_obs[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
 
-        # Model MSE Loss
-        plt.figure()
-        plt.plot([i for i in range(len(average_losses_list))], average_losses_list)
-        plt.xlabel('CEM Iteration')
-        plt.ylabel('Dynamics Model MSE Loss')
-        plt.title('Average MSE Loss across network ensemble')
-        plt.savefig(os.path.join(cem_logger.logdir, 'dynamics_model_loss.png'))
-        plt.close()
+        if args.learn_dynamics_model and args.engineered_rewards:
+            # Model MSE Loss
+            plt.figure()
+            plt.plot([i for i in range(len(average_losses_list))], average_losses_list)
+            plt.xlabel('CEM Iteration')
+            plt.ylabel('Dynamics Model MSE Loss')
+            plt.title('Average MSE Loss across network ensemble')
+            plt.savefig(os.path.join(cem_logger.logdir, 'dynamics_model_loss.png'))
+            plt.close()
 
         # log actions
         plt.figure()
