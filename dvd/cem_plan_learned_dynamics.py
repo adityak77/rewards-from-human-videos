@@ -177,12 +177,12 @@ if __name__ == '__main__':
                 with torch.no_grad():
                     init_state = copy.deepcopy(very_start)
                     acs_seq = action_samples[i].reshape(TIMESTEPS, nu)
-                    env_copy_info = rollout_trajectory(init_state, acs_seq, model).cpu().numpy()
+                    curr_state = rollout_trajectory(init_state, acs_seq, model).cpu().numpy()
             """"Abstract away above"""
 
             if args.learn_dynamics_model:
                 sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
-            if args.engineered_rewards:
+            elif args.engineered_rewards:
                 curr_state = tabletop_obs(env_copy_info)
                 sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
 
