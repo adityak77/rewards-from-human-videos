@@ -157,76 +157,58 @@ if __name__ == '__main__':
         very_start = tabletop_obs(start_info)
 
         tstart = time.perf_counter()
-        action_distribution = MultivariateNormal(actions_mean, actions_cov)
-        action_samples = action_distribution.sample((N_SAMPLES,)).cpu().numpy()
-        sample_rewards = torch.zeros(N_SAMPLES)
-
-        if args.dvd or args.vip:
-            states = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
-
-        for i in range(N_SAMPLES):
-            """Abstract away below"""
-            env_copy = copy.deepcopy(env)
-            if not args.learn_dynamics_model:
-                for t in range(TIMESTEPS):
-                    u = action_samples[i, t*nu:(t+1)*nu]
-                    obs, _, _, env_copy_info = env_copy.step(u)
-                    if args.dvd or args.vip:
-                        states[i, t] = obs
-            else:
-                with torch.no_grad():
-                    init_state = copy.deepcopy(very_start)
-                    acs_seq = action_samples[i].reshape(TIMESTEPS, nu)
-                    curr_state = rollout_trajectory(init_state, acs_seq, model).cpu().numpy()
-            """"Abstract away above"""
-
-            if args.learn_dynamics_model:
-                sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
-            elif args.engineered_rewards:
-                curr_state = tabletop_obs(env_copy_info)
-                sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
-
-        if args.dvd or args.vip:
-            sample_rewards = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
-
-        # update elites
-        _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
-        elites = action_samples[best_inds]
-
-        actions_mean = torch.tensor(elites).mean(dim=0)
-        actions_cov = torch.Tensor(np.cov(elites.T))
-        if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
-            actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
-
-        # follow sampled trajectory
-        action_distribution = MultivariateNormal(actions_mean, actions_cov)
-        traj_sample = action_distribution.sample((1,))
-
-        states = np.zeros((1, TIMESTEPS, 120, 180, 3))
-
-        """Abstract away below"""
+        all_obs = np.zeros((1, TIMESTEPS, 120, 180, 3))
         generated_states = np.zeros((TIMESTEPS+1, nx))
         generated_states[0] = very_start
-
+        all_acs = np.zeros((TIMESTEPS, nu))
         for t in range(TIMESTEPS):
-            action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
-            obs, r, done, low_dim_info = env.step(action.cpu().numpy())
-            states[0, t] = obs
+            action_distribution = MultivariateNormal(actions_mean, actions_cov)
+            action_samples = action_distribution.sample((N_SAMPLES,)).cpu().numpy()
+            sample_rewards = torch.zeros(N_SAMPLES)
+
+            for i in range(N_SAMPLES):
+                """Abstract away below"""
+                with torch.no_grad():
+                    init_state = generated_states[t]
+                    acs_seq = action_samples[i].reshape(TIMESTEPS, nu)[t:, :]
+                    curr_state = rollout_trajectory(init_state, acs_seq, model).cpu().numpy()
+                """"Abstract away above"""
+
+                sample_rewards[i] = terminal_reward_fn(curr_state, _, very_start=very_start)
+                
+            # update elites
+            _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
+            elites = action_samples[best_inds]
+
+            actions_mean = torch.tensor(elites).mean(dim=0)
+            actions_cov = torch.Tensor(np.cov(elites.T))
+            if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
+
+            # follow sampled trajectory
+            action_distribution = MultivariateNormal(actions_mean, actions_cov)
+            traj_sample = action_distribution.sample((1,))
+
+            """Abstract away below"""
+            action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
+            obs, r, done, low_dim_info = env.step(action)
+            all_obs[0, t] = obs
             generated_states[t+1, :] = tabletop_obs(low_dim_info)
+            all_acs[t, :] = action
+            """Abstract away above"""
         
         if args.learn_dynamics_model:
-            ac_seqs = traj_sample.cpu().numpy().reshape(TIMESTEPS, nu)
-            dataset.add(generated_states, acs_seq)
+            dataset.add(generated_states, all_acs)
             if ep % 5 == 0:
                 loss = train(model, dataset)
                 print(f'Train Loss {ep}: {loss:.7f}')
-        """Abstract away above"""
+            
         tend = time.perf_counter()
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
         if not args.engineered_rewards:
-            additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         else:
             additional_reward = 0 # NA
 
@@ -257,5 +239,5 @@ if __name__ == '__main__':
         cem_logger.update(gt_reward, succ, mean_sampled_rewards, additional_reward, additional_reward_type)
 
         # logging results
-        all_obs = (states[0] * 255).astype(np.uint8)
+        all_obs = (all_obs[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
