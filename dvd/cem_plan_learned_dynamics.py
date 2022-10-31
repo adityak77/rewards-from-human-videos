@@ -70,6 +70,9 @@ if __name__ == '__main__':
     # only one of these reward functions allowed per run
     assert sum([args.engineered_rewards, args.dvd, args.vip]) == 1
 
+    if args.learn_dynamics_model:
+        assert args.engineered_rewards
+
     # assigning reward functions
     if args.engineered_rewards:
         if args.task_id == 94:
@@ -94,7 +97,7 @@ if __name__ == '__main__':
         terminal_reward_fn = vip_reward
 
     # dynamics function loading
-    if args.engineered_rewards and args.learn_dynamics_model:
+    if args.learn_dynamics_model:
         dataset = Dataset(nx, nu)
         model = nn_constructor()
 
@@ -182,11 +185,11 @@ if __name__ == '__main__':
 
             for i in range(N_SAMPLES):
                 """Abstract away below"""
-                env_copy = copy.deepcopy(env)
-                if args.engineered_rewards and args.learn_dynamics_model:
+                if args.learn_dynamics_model:
                     ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)[t:]
                     final_state = rollout_trajectory(states[t], ac_seqs, model)
                 else:
+                    env_copy = copy.deepcopy(env)
                     for t2 in range(TIMESTEPS):
                         u = action_samples[i, t2*nu:(t2+1)*nu].cpu().numpy()
                         obs, _, _, env_copy_info = env_copy.step(u)
@@ -223,6 +226,10 @@ if __name__ == '__main__':
             action_distribution = MultivariateNormal(actions_mean, actions_cov)
             traj_sample = action_distribution.sample((1,))
 
+            # run open loop CEM if online sampling
+            if not args.learn_dynamics_model:
+                break
+
             action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
             obs, r, done, low_dim_info = env.step(action)
             all_obs[0, t] = obs
@@ -230,26 +237,15 @@ if __name__ == '__main__':
             states[t+1, :] = tabletop_obs(low_dim_info)
             actions[t, :] = action
 
-        # replay the environment
-        env_replay = Tabletop(log_freq=args.env_log_freq, 
-                    filepath=args.log_dir + '/env',
-                    xml=args.xml,
-                    verbose=args.verbose)  # bypass the default TimeLimit wrapper
-        _, start_info = env_replay.reset_model()
-        all_obs_replay = np.zeros((TIMESTEPS, 120, 180, 3))
-        for t in range(TIMESTEPS):
-            obs, _, _, _ = env_replay.step(actions[t])
-            all_obs_replay[t] = obs
-
-        if args.engineered_rewards and args.learn_dynamics_model:
-            # import ipdb; ipdb.set_trace()
-            outputs = rollout_trajectory(very_start, traj_sample[0].reshape(TIMESTEPS, nu), model)
-            mse_frac = ((outputs - states[-1, :]) ** 2).mean() / ((very_start - states[-1, :]) ** 2).mean()
-            print('MSE fraction of start', mse_frac)
-            # import ipdb; ipdb.set_trace()
+        # run open loop CEM if online sampling
+        if not args.learn_dynamics_model:
+            for t in range(TIMESTEPS):
+                action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
+                obs, r, done, low_dim_info = env.step(action)
+                all_obs[0, t] = obs
 
         # add data to dataset and training model
-        if args.learn_dynamics_model and args.engineered_rewards:
+        if args.learn_dynamics_model:
             dataset.add(states, actions)
             average_losses = train(model, dataset)
             average_losses_list.append(average_losses)
@@ -293,11 +289,7 @@ if __name__ == '__main__':
         all_obs = (all_obs[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
 
-        all_obs_replay = (all_obs_replay * 255).astype(np.uint8)
-        # store video of trajectory
-        imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'replay{cem_logger.total_iterations}.gif'), all_obs_replay, fps=20)
-
-        if args.learn_dynamics_model and args.engineered_rewards:
+        if args.learn_dynamics_model:
             # Model MSE Loss
             plt.figure()
             plt.plot([i for i in range(len(average_losses_list))], average_losses_list)
@@ -306,49 +298,3 @@ if __name__ == '__main__':
             plt.title('Average MSE Loss across network ensemble')
             plt.savefig(os.path.join(cem_logger.logdir, 'dynamics_model_loss.png'))
             plt.close()
-
-        # # log actions
-        # plt.figure()
-        # plt.plot([i for i in range(actions.shape[0])], actions.T[0], label='ind0')
-        # plt.plot([i for i in range(actions.shape[0])], actions.T[1], label='ind1')
-        # plt.plot([i for i in range(actions.shape[0])], actions.T[2], label='ind2')
-        # plt.xlabel('Step')
-        # plt.ylabel('Action values')
-        # plt.title(f'Action values in episode {ep}')
-        # plt.legend()
-        # plt.savefig(os.path.join(cem_logger.logdir_iteration, f'actions{ep}.png'))
-        # plt.close()
-
-        # log states
-        plt.figure()
-        plt.plot([i for i in range(states.shape[0])], states.T[0], label='hand_x')
-        plt.plot([i for i in range(states.shape[0])], states.T[1], label='hand_y')
-        plt.plot([i for i in range(states.shape[0])], states.T[2], label='hand_z')
-        plt.xlabel('Step')
-        plt.ylabel('EEF state values')
-        plt.title(f'EEF states in episode {ep}')
-        plt.legend()
-        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'states{ep}.png'))
-        plt.close()
-
-        # log X
-        plt.figure()
-        plt.plot([i for i in range(actions.shape[0])], actions.T[0], label='action')
-        plt.plot([i for i in range(states.shape[0])], states.T[0], label='state')
-        plt.xlabel('Step')
-        plt.ylabel('X values')
-        plt.title(f'X state + action values in episode {ep}')
-        plt.legend()
-        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'sa_x{ep}.png'))
-        plt.close()
-
-        # log Y
-        plt.figure()
-        plt.plot([i for i in range(actions.shape[0])], actions.T[1], label='action')
-        plt.plot([i for i in range(states.shape[0])], states.T[1], label='state')
-        plt.xlabel('Step')
-        plt.ylabel('Y values')
-        plt.title(f'Y state + action values in episode {ep}')
-        plt.legend()
-        plt.savefig(os.path.join(cem_logger.logdir_iteration, f'sa_y{ep}.png'))
-        plt.close()
