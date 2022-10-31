@@ -101,7 +101,7 @@ if __name__ == '__main__':
         # need to perform some initial rollouts before training
         ac_lb = -np.ones(nu)
         ac_ub = np.ones(nu)
-        pretrain_iters = 10
+        pretrain_iters = 200
         print(f'Rolling out {pretrain_iters} iterations before CEM for dynamics training...')
         for iter in range(pretrain_iters):
             # env initialization
@@ -124,9 +124,9 @@ if __name__ == '__main__':
 
             dataset.add(states, actions)
         
-        model.fit_input_stats(dataset.get_inputs_targets()[0])
-        # for _ in range(10):
-        #     train(model, dataset)
+        # model.fit_input_stats(dataset.get_inputs_targets()[0])
+        for _ in range(20):
+            train(model, dataset)
 
     # reading demos
     if not args.engineered_rewards:
@@ -167,63 +167,62 @@ if __name__ == '__main__':
         very_start = tabletop_obs(start_info)
 
         tstart = time.perf_counter()
-        action_distribution = MultivariateNormal(actions_mean, actions_cov)
-        action_samples = action_distribution.sample((N_SAMPLES,))
-        sample_rewards = torch.zeros(N_SAMPLES)
-
-        if args.dvd or args.vip:
-            all_obs = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
-
-        for i in range(N_SAMPLES):
-            """Abstract away below"""
-            env_copy = copy.deepcopy(env)
-            if args.engineered_rewards and args.learn_dynamics_model:
-                ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)
-                final_state = rollout_trajectory(very_start, ac_seqs, model)
-            else:
-                for t in range(TIMESTEPS):
-                    u = action_samples[i, t*nu:(t+1)*nu].cpu().numpy()
-                    obs, _, _, env_copy_info = env_copy.step(u)
-                    if args.dvd or args.vip:
-                        all_obs[i, t] = obs
-                final_state = tabletop_obs(env_copy_info)
-            """"Abstract away above"""
-
-            if args.engineered_rewards:
-                if args.learn_dynamics_model:
-                    # take mean reward over particles final state
-                    particle_rewards = torch.zeros(final_state.shape[0])
-                    for j in range(final_state.shape[0]):
-                        particle_rewards[j] = terminal_reward_fn(final_state[j], _, very_start=very_start)
-                    sample_rewards[i] = particle_rewards.mean() 
-                else:
-                    sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
-
-        print('sample_rewards', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
-
-        if args.dvd or args.vip:
-            sample_rewards = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
-
-        # update elites
-        _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
-        elites = action_samples[best_inds]
-
-        actions_mean = elites.mean(dim=0)
-        actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
-        if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
-            actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
-
-        # follow sampled trajectory
-        action_distribution = MultivariateNormal(actions_mean, actions_cov)
-        traj_sample = action_distribution.sample((1,))
 
         all_obs = np.zeros((1, TIMESTEPS, 120, 180, 3))
-
         states = np.zeros((TIMESTEPS+1, nx))
         actions = np.zeros((TIMESTEPS, nu))
         states[0] = very_start
-        # import ipdb; ipdb.set_trace()
         for t in range(TIMESTEPS):
+            action_distribution = MultivariateNormal(actions_mean, actions_cov)
+            action_samples = action_distribution.sample((N_SAMPLES,))
+            sample_rewards = torch.zeros(N_SAMPLES)
+
+            if args.dvd or args.vip:
+                all_obs = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
+
+            for i in range(N_SAMPLES):
+                """Abstract away below"""
+                env_copy = copy.deepcopy(env)
+                if args.engineered_rewards and args.learn_dynamics_model:
+                    ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)[t:]
+                    final_state = rollout_trajectory(states[t], ac_seqs, model)
+                else:
+                    for t2 in range(TIMESTEPS):
+                        u = action_samples[i, t2*nu:(t2+1)*nu].cpu().numpy()
+                        obs, _, _, env_copy_info = env_copy.step(u)
+                        if args.dvd or args.vip:
+                            all_obs[i, t2] = obs
+                    final_state = tabletop_obs(env_copy_info)
+                """"Abstract away above"""
+
+                if args.engineered_rewards:
+                    if args.learn_dynamics_model:
+                        # take mean reward over particles final state
+                        particle_rewards = torch.zeros(final_state.shape[0])
+                        for j in range(final_state.shape[0]):
+                            particle_rewards[j] = terminal_reward_fn(final_state[j], _, very_start=very_start)
+                        sample_rewards[i] = particle_rewards.mean() 
+                    else:
+                        sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
+
+            print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
+
+            if args.dvd or args.vip:
+                sample_rewards = terminal_reward_fn(all_obs, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+
+            # update elites
+            _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
+            elites = action_samples[best_inds]
+
+            actions_mean = elites.mean(dim=0)
+            actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
+            if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
+
+            # follow sampled trajectory
+            action_distribution = MultivariateNormal(actions_mean, actions_cov)
+            traj_sample = action_distribution.sample((1,))
+
             action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
             obs, r, done, low_dim_info = env.step(action)
             all_obs[0, t] = obs
