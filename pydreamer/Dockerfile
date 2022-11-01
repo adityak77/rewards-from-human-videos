@@ -72,11 +72,18 @@ ENV DMLAB_DATASET_PATH "/app/dmlab_data"
 # MineRL (optional)
 # ------------------------
 
-FROM base AS minerl-env
-RUN apt-get update && apt-get install -y \
-    openjdk-8-jdk libx11-6 x11-xserver-utils \
-    && rm -rf /var/lib/apt/lists/*
-RUN pip3 install minerl==0.4.1a2
+RUN apt-get install -y openjdk-8-jdk libx11-6 x11-xserver-utils
+RUN pip3 install minerl==0.4.4
+
+# ------------------------
+# My environments
+# ------------------------
+
+# procgen
+RUN pip3 install procgen
+
+# Memory maze
+RUN pip3 install memory-maze==1.0.2
 
 # ------------------------
 # PyDreamer
@@ -88,8 +95,10 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt
-# RUN pip3 install git+https://github.com/jurgisp/gym-minigrid.git@e979bc77a9377346a6a0311a257e8bbb218e611c#egg=gym-minigrid
-# RUN pip3 install git+https://github.com/jurgisp/gym-miniworld.git@1ff6ed40c9b27a1b6285566ee8af80dda85bfcce#egg=gym-miniworld
+
+# TODO: this is for Embodied-minecraft environment. Need a local copy of embodied-private
+# COPY embodied embodied
+# RUN pip3 install -e embodied
 
 ENV MLFLOW_TRACKING_URI ""
 ENV MLFLOW_EXPERIMENT_NAME "Default"
