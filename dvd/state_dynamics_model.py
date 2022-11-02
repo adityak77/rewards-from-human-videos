@@ -19,9 +19,10 @@ NPART = 20 # number of particles
 EPOCHS = 5 # model_train_cfg['epochs']
 
 class Dataset:
-    def __init__(self, nx, nu):
+    def __init__(self, nx, nu, maxsize=10000):
         self.nx = nx
         self.nu = nu
+        self.maxsize = maxsize
         self.initialized = False
 
         self.inputs = None
@@ -57,6 +58,11 @@ class Dataset:
 
             self.inputs = np.concatenate([self.inputs, new_inputs], axis=0)
             self.targets = np.concatenate([self.targets, new_targets], axis=0)
+
+        if self.inputs.shape[0] > self.maxsize:
+            idxs = np.random.choice(self.inputs.shape[0], self.maxsize, replace=False)
+            self.inputs = self.inputs[idxs]
+            self.targets = self.targets[idxs]
 
     def sample(self, num_samples):
         """
@@ -247,13 +253,15 @@ def rollout_trajectory(init_state, ac_seqs, model):
     cur_obs = cur_obs[None]
     cur_obs = cur_obs.expand(NPART, -1) # NPART x nx
 
+    all_obs = []
     for t in range(ac_seqs.shape[0]):
         cur_acs = ac_seqs[t]
         cur_obs = _predict_next_obs(cur_obs, cur_acs, model)
+        all_obs.append(cur_obs.cpu().numpy())
 
     # print(t, ':', torch.isnan(cur_obs.view(-1)).sum().item())
 
-    return cur_obs.cpu().numpy()
+    return np.array(all_obs) # cur_obs.cpu().numpy()
 
 def _predict_next_obs(obs, acs, model):
     proc_obs = obs # self.obs_preproc(obs)

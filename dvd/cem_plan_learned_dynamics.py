@@ -187,7 +187,9 @@ if __name__ == '__main__':
                 """Abstract away below"""
                 if args.learn_dynamics_model:
                     ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)[t:]
-                    final_state = rollout_trajectory(states[t], ac_seqs, model)
+                    assert (t + ac_seqs.shape[0]) == TIMESTEPS
+                    all_states = rollout_trajectory(states[t], ac_seqs, model)
+                    final_state = all_states[-1]
                 else:
                     env_copy = copy.deepcopy(env)
                     for t2 in range(TIMESTEPS):
@@ -201,10 +203,12 @@ if __name__ == '__main__':
                 if args.engineered_rewards:
                     if args.learn_dynamics_model:
                         # take mean reward over particles final state
-                        particle_rewards = torch.zeros(final_state.shape[0])
-                        for j in range(final_state.shape[0]):
-                            particle_rewards[j] = terminal_reward_fn(final_state[j], _, very_start=very_start)
-                        sample_rewards[i] = particle_rewards.mean() 
+                        # import ipdb; ipdb.set_trace()
+                        particle_rewards = torch.zeros(all_states.shape[0], all_states.shape[1])
+                        for j in range(all_states.shape[0]):
+                            for k in range(all_states.shape[1]):
+                                particle_rewards[j, k] = terminal_reward_fn(all_states[j, k], _, very_start=very_start)
+                        sample_rewards[i] = particle_rewards.mean()
                     else:
                         sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
 
@@ -269,7 +273,7 @@ if __name__ == '__main__':
         elif args.task_id == 41:
             rew = low_dim_state[4] - very_start[4]
             gt_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
-            penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
+            penalty = 0 # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
             success_threshold = 0.03
         elif args.task_id == 5:
             rew = low_dim_state[10]
