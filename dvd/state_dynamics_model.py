@@ -19,10 +19,9 @@ NPART = 20 # number of particles
 EPOCHS = 5 # model_train_cfg['epochs']
 
 class Dataset:
-    def __init__(self, nx, nu, maxsize=10000):
+    def __init__(self, nx, nu):
         self.nx = nx
         self.nu = nu
-        self.maxsize = maxsize
         self.initialized = False
 
         self.inputs = None
@@ -35,7 +34,6 @@ class Dataset:
         :param acs_traj: np.ndarray 
             Actions of shape T x nu
         """
-        # import ipdb; ipdb.set_trace()
         if not self.initialized:
             assert len(obs_traj.shape) == 2 and obs_traj.shape[1] == self.nx
             assert len(acs_traj.shape) == 2 and acs_traj.shape[1] == self.nu
@@ -59,11 +57,6 @@ class Dataset:
             self.inputs = np.concatenate([self.inputs, new_inputs], axis=0)
             self.targets = np.concatenate([self.targets, new_targets], axis=0)
 
-        if self.inputs.shape[0] > self.maxsize:
-            idxs = np.random.choice(self.inputs.shape[0], self.maxsize, replace=False)
-            self.inputs = self.inputs[idxs]
-            self.targets = self.targets[idxs]
-
     def sample(self, num_samples):
         """
         :param num_samples int
@@ -84,14 +77,15 @@ class PtModel(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.num_hidden = 200
 
-        self.lin0_w, self.lin0_b = get_affine_params(ensemble_size, in_features, 200)
+        self.lin0_w, self.lin0_b = get_affine_params(ensemble_size, in_features, self.num_hidden)
 
-        self.lin1_w, self.lin1_b = get_affine_params(ensemble_size, 200, 200)
+        self.lin1_w, self.lin1_b = get_affine_params(ensemble_size, self.num_hidden, self.num_hidden)
 
-        self.lin2_w, self.lin2_b = get_affine_params(ensemble_size, 200, 200)
+        self.lin2_w, self.lin2_b = get_affine_params(ensemble_size, self.num_hidden, self.num_hidden)
 
-        self.lin3_w, self.lin3_b = get_affine_params(ensemble_size, 200, out_features)
+        self.lin3_w, self.lin3_b = get_affine_params(ensemble_size, self.num_hidden, out_features)
 
         self.inputs_mu = nn.Parameter(torch.zeros(in_features), requires_grad=False)
         self.inputs_sigma = nn.Parameter(torch.zeros(in_features), requires_grad=False)
@@ -101,10 +95,10 @@ class PtModel(nn.Module):
 
     def compute_decays(self):
 
-        lin0_decays = 0.0025 * (self.lin0_w ** 2).sum() / 2.0
-        lin1_decays = 0.005 * (self.lin1_w ** 2).sum() / 2.0
-        lin2_decays = 0.005 * (self.lin2_w ** 2).sum() / 2.0
-        lin3_decays = 0.0075 * (self.lin3_w ** 2).sum() / 2.0
+        lin0_decays = 0.00025 * (self.lin0_w ** 2).sum() / 2.0
+        lin1_decays = 0.0005 * (self.lin1_w ** 2).sum() / 2.0
+        lin2_decays = 0.0005 * (self.lin2_w ** 2).sum() / 2.0
+        lin3_decays = 0.00075 * (self.lin3_w ** 2).sum() / 2.0
 
         return lin0_decays + lin1_decays + lin2_decays + lin3_decays
 
@@ -183,10 +177,6 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
 
     # Train the pytorch model
     inputs, targets = dataset.get_inputs_targets()
-    # print('mu', model.inputs_mu.data)
-    # print('sigma', model.inputs_sigma.data)
-    # for k, v in model.state_dict().items():
-    #     print(k, v.min(), v.max())
     model.fit_input_stats(inputs)
 
     idxs = np.random.randint(inputs.shape[0], size=[model.num_nets, inputs.shape[0]])
@@ -206,8 +196,6 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
             # TODO: move all training data to GPU before hand
             train_in = torch.from_numpy(inputs[batch_idxs]).to(TORCH_DEVICE).float()
             train_targ = torch.from_numpy(targets[batch_idxs]).to(TORCH_DEVICE).float()
-
-            # import ipdb; ipdb.set_trace()
 
             mean, logvar = model(train_in, ret_logvar=True)
             inv_var = torch.exp(-logvar)
@@ -258,8 +246,6 @@ def rollout_trajectory(init_state, ac_seqs, model):
         cur_acs = ac_seqs[t]
         cur_obs = _predict_next_obs(cur_obs, cur_acs, model)
         all_obs.append(cur_obs.cpu().numpy())
-
-    # print(t, ':', torch.isnan(cur_obs.view(-1)).sum().item())
 
     return np.array(all_obs) # cur_obs.cpu().numpy()
 

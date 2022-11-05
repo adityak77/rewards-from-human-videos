@@ -65,6 +65,9 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
+    pretrain_samples = 200
+    pretrain_iters = 20
+
     dtype = torch.double
 
     # only one of these reward functions allowed per run
@@ -104,9 +107,8 @@ if __name__ == '__main__':
         # need to perform some initial rollouts before training
         ac_lb = -np.ones(nu)
         ac_ub = np.ones(nu)
-        pretrain_iters = 200
-        print(f'Rolling out {pretrain_iters} iterations before CEM for dynamics training...')
-        for iter in range(pretrain_iters):
+        print(f'Rolling out {pretrain_samples} iterations before CEM for dynamics training...')
+        for iter in range(pretrain_samples):
             # env initialization
             env = Tabletop(log_freq=args.env_log_freq, 
                         filepath=args.log_dir + '/env',
@@ -128,7 +130,7 @@ if __name__ == '__main__':
             dataset.add(states, actions)
         
         # model.fit_input_stats(dataset.get_inputs_targets()[0])
-        for _ in range(20):
+        for _ in range(pretrain_iters):
             train(model, dataset)
 
     # reading demos
