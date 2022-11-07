@@ -67,6 +67,7 @@ if __name__ == '__main__':
 
     pretrain_samples = 200
     pretrain_iters = 20
+    state_history_length = 3
 
     dtype = torch.double
 
@@ -185,12 +186,17 @@ if __name__ == '__main__':
             if args.dvd or args.vip:
                 all_obs = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
 
+            # import ipdb; ipdb.set_trace()
             for i in range(N_SAMPLES):
                 """Abstract away below"""
                 if args.learn_dynamics_model:
                     ac_seqs = action_samples[i].reshape(TIMESTEPS, nu)[t:]
                     assert (t + ac_seqs.shape[0]) == TIMESTEPS
-                    all_states = rollout_trajectory(states[t], ac_seqs, model)
+                    state_histories = []
+                    for h in range(t - state_history_length + 1, t+1):
+                        ind = max(h, 0)
+                        state_histories.append(states[ind])
+                    all_states = rollout_trajectory(np.array(state_histories), ac_seqs, model)
                     final_state = all_states[-1]
                 else:
                     env_copy = copy.deepcopy(env)
