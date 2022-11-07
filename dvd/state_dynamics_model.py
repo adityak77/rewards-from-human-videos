@@ -23,6 +23,7 @@ class Dataset:
         self.nx = nx
         self.nu = nu
         self.initialized = False
+        self.history_length = 3
 
         self.inputs = None
         self.targets = None
@@ -34,26 +35,29 @@ class Dataset:
         :param acs_traj: np.ndarray 
             Actions of shape T x nu
         """
+        states = obs_traj[:-1]
+        state_histories = np.zeros((states.shape[0], states.shape[1] * self.history_length))
+        for i in range(state_histories.shape[0]):
+            hist = []
+            for j in range(self.history_length):
+                ind = max(i - j, 0)
+                hist.append(states[ind])
+            state_histories[i] = np.concatenate(hist)
+
+        next_states = obs_traj[1:]
+        new_inputs = np.concatenate([state_histories, acs_traj], axis=1)
+        new_targets = next_states - states
+
         if not self.initialized:
             assert len(obs_traj.shape) == 2 and obs_traj.shape[1] == self.nx
             assert len(acs_traj.shape) == 2 and acs_traj.shape[1] == self.nu
             assert obs_traj.shape[0] == acs_traj.shape[0] + 1
-
-            states = obs_traj[:-1]
-            next_states = obs_traj[1:]
-            new_inputs = np.concatenate([states, acs_traj], axis=1)
-            new_targets = next_states - states
 
             self.inputs = new_inputs
             self.targets = new_targets
             self.initialized = True
 
         else:
-            states = obs_traj[:-1]
-            next_states = obs_traj[1:]
-            new_inputs = np.concatenate([states, acs_traj], axis=1)
-            new_targets = next_states - states
-
             self.inputs = np.concatenate([self.inputs, new_inputs], axis=0)
             self.targets = np.concatenate([self.targets, new_targets], axis=0)
 
@@ -144,7 +148,7 @@ def nn_constructor():
     nx = 13 # state space size
     nu = 4 # action space size
 
-    model_in = nx + nu # given state and action
+    model_in = nx * 3 + nu # given state history and action
     model_out = nx * 2 # predict next state mean and next state variance
 
     model = PtModel(ensemble_size, model_in, model_out).to(TORCH_DEVICE)
@@ -171,9 +175,6 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
     if obs_trajs is not None and acs_trajs is not None:
         for obs, acs in zip(obs_trajs, acs_trajs):
             dataset.add(obs, acs)
-
-    # Train the model
-    # self.has_been_trained = True
 
     # Train the pytorch model
     inputs, targets = dataset.get_inputs_targets()
@@ -228,29 +229,34 @@ def train(model, dataset, obs_trajs=None, acs_trajs=None):
     return mse_losses_list.mean()
 
 @torch.no_grad()
-def rollout_trajectory(init_state, ac_seqs, model):
+def rollout_trajectory(state_history, ac_seqs, model):
     """
-    :param init_state np.ndarray (nx,)
+    :param state_history np.ndarray (history, nx)
     :param ac_seqs torch.Tensor (T, nu)
     """
     ac_seqs = ac_seqs.float().to(TORCH_DEVICE)
     expanded = ac_seqs.unsqueeze(1)
     ac_seqs = expanded.expand(-1, NPART, -1) # T x NPART x nu
 
-    cur_obs = torch.from_numpy(init_state).float().to(TORCH_DEVICE)
-    cur_obs = cur_obs[None]
-    cur_obs = cur_obs.expand(NPART, -1) # NPART x nx
-
+    history = state_history.shape[0]
     all_obs = []
+    for i in range(history):
+        cur_obs = torch.from_numpy(state_history[i]).float().to(TORCH_DEVICE)
+        cur_obs = cur_obs[None]
+        cur_obs = cur_obs.expand(NPART, -1) # NPART x nx
+        all_obs.append(cur_obs)
+
     for t in range(ac_seqs.shape[0]):
         cur_acs = ac_seqs[t]
-        cur_obs = _predict_next_obs(cur_obs, cur_acs, model)
-        all_obs.append(cur_obs.cpu().numpy())
+        cur_obs = _predict_next_obs(all_obs[::-1][:history], cur_acs, model)
+        all_obs.append(cur_obs)
 
-    return np.array(all_obs) # cur_obs.cpu().numpy()
+    return np.array([all_obs[i].cpu().numpy() for i in range(history, len(all_obs))]) # cur_obs.cpu().numpy()
 
-def _predict_next_obs(obs, acs, model):
-    proc_obs = obs # self.obs_preproc(obs)
+def _predict_next_obs(input_obs, acs, model):
+    # input obs is last (history) observations in reverse order
+    proc_obs = torch.cat(input_obs, dim=1) # self.obs_preproc(obs)
+    last_obs = input_obs[0]
 
     # assert self.prop_mode == 'TSinf'
 
@@ -266,7 +272,8 @@ def _predict_next_obs(obs, acs, model):
     # TS Optimization: Remove additional dimension
     predictions = _flatten_to_matrix(predictions, model)
 
-    return obs + predictions
+    import ipdb; ipdb.set_trace() # print(predictions.min(), predictions.mean(), predictions.max())
+    return last_obs + predictions
 
 def _expand_to_ts_format(mat, model):
     dim = mat.shape[-1]
