@@ -23,7 +23,7 @@ class Dataset:
         self.nx = nx
         self.nu = nu
         self.initialized = False
-        self.history_length = 3
+        self.history_length = 6
 
         self.inputs = None
         self.targets = None
@@ -36,7 +36,7 @@ class Dataset:
             Actions of shape T x nu
         """
         states = obs_traj[:-1]
-        state_histories = np.zeros((states.shape[0], states.shape[1] * self.history_length))
+        state_histories = np.zeros((states.shape[0], self.nx * self.history_length))
         for i in range(state_histories.shape[0]):
             hist = []
             for j in range(self.history_length):
@@ -99,10 +99,10 @@ class PtModel(nn.Module):
 
     def compute_decays(self):
 
-        lin0_decays = 0.00025 * (self.lin0_w ** 2).sum() / 2.0
-        lin1_decays = 0.0005 * (self.lin1_w ** 2).sum() / 2.0
-        lin2_decays = 0.0005 * (self.lin2_w ** 2).sum() / 2.0
-        lin3_decays = 0.00075 * (self.lin3_w ** 2).sum() / 2.0
+        lin0_decays = 0.0025 * (self.lin0_w ** 2).sum() / 2.0
+        lin1_decays = 0.005 * (self.lin1_w ** 2).sum() / 2.0
+        lin2_decays = 0.005 * (self.lin2_w ** 2).sum() / 2.0
+        lin3_decays = 0.0075 * (self.lin3_w ** 2).sum() / 2.0
 
         return lin0_decays + lin1_decays + lin2_decays + lin3_decays
 
@@ -148,7 +148,7 @@ def nn_constructor():
     nx = 13 # state space size
     nu = 4 # action space size
 
-    model_in = nx * 3 + nu # given state history and action
+    model_in = nx * 6 + nu # given state history and action
     model_out = nx * 2 # predict next state mean and next state variance
 
     model = PtModel(ensemble_size, model_in, model_out).to(TORCH_DEVICE)
@@ -251,7 +251,7 @@ def rollout_trajectory(state_history, ac_seqs, model):
         cur_obs = _predict_next_obs(all_obs[::-1][:history], cur_acs, model)
         all_obs.append(cur_obs)
 
-    return np.array([all_obs[i].cpu().numpy() for i in range(history, len(all_obs))]) # cur_obs.cpu().numpy()
+    return np.array([elem.cpu().numpy() for elem in all_obs[history:]]) # cur_obs.cpu().numpy()
 
 def _predict_next_obs(input_obs, acs, model):
     # input obs is last (history) observations in reverse order
@@ -272,7 +272,6 @@ def _predict_next_obs(input_obs, acs, model):
     # TS Optimization: Remove additional dimension
     predictions = _flatten_to_matrix(predictions, model)
 
-    import ipdb; ipdb.set_trace() # print(predictions.min(), predictions.mean(), predictions.max())
     return last_obs + predictions
 
 def _expand_to_ts_format(mat, model):
