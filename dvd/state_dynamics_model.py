@@ -152,7 +152,7 @@ def nn_constructor():
     model_out = nx * 2 # predict next state mean and next state variance
 
     model = PtModel(ensemble_size, model_in, model_out).to(TORCH_DEVICE)
-    model.optim = torch.optim.Adam(model.parameters(), lr=0.001)
+    model.optim = torch.optim.Adam(model.parameters(), lr=0.0001)
 
     return model
 

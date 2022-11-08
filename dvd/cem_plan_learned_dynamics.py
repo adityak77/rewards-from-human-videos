@@ -65,8 +65,8 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
-    pretrain_samples = 200
-    pretrain_iters = 20
+    pretrain_samples = 1 # 200
+    pretrain_iters = 1 # 20
     state_history_length = 6
 
     dtype = torch.double
