@@ -336,7 +336,7 @@ def reward_push_mug_left_to_right(state, action, **kwargs):
 
     # for bad dynamics model
     if torch.isnan(torch.tensor([reward])):
-        reward = -1e6
+        reward = -1e40
 
     return torch.Tensor([reward]).to(torch.float32)
 
@@ -358,7 +358,7 @@ def reward_push_mug_forward(state, action, **kwargs):
 
     # for bad dynamics model
     if torch.isnan(torch.tensor([reward])):
-        reward = -1e6
+        reward = -1e40
 
     return torch.Tensor([reward]).to(torch.float32)
 
@@ -380,7 +380,7 @@ def reward_close_drawer(state, action, **kwargs):
 
     # for bad dynamics model
     if torch.isnan(torch.tensor([reward])):
-        reward = -1e6
+        reward = -1e40
 
     return torch.Tensor([reward]).to(torch.float32)
 

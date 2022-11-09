@@ -179,6 +179,8 @@ if __name__ == '__main__':
         actions = np.zeros((TIMESTEPS, nu))
         states[0] = very_start
         for t in range(TIMESTEPS):
+            if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
             action_distribution = MultivariateNormal(actions_mean, actions_cov)
             action_samples = action_distribution.sample((N_SAMPLES,))
             sample_rewards = torch.zeros(N_SAMPLES)
@@ -213,11 +215,13 @@ if __name__ == '__main__':
                 if args.engineered_rewards:
                     if args.learn_dynamics_model:
                         # take mean reward over particles final state
-                        # import ipdb; ipdb.set_trace()
-                        particle_rewards = torch.zeros(all_states.shape[0], all_states.shape[1])
-                        for j in range(all_states.shape[0]):
-                            for k in range(all_states.shape[1]):
-                                particle_rewards[j, k] = terminal_reward_fn(all_states[j, k], _, very_start=very_start)
+                        # particle_rewards = torch.zeros(all_states.shape[0], all_states.shape[1])
+                        # for j in range(all_states.shape[0]):
+                        #     for k in range(all_states.shape[1]):
+                        #         particle_rewards[j, k] = terminal_reward_fn(all_states[j, k], _, very_start=very_start)
+                        particle_rewards = torch.zeros(final_state.shape[0])
+                        for j in range(final_state.shape[0]):
+                            particle_rewards[j] = terminal_reward_fn(final_state[j], _, very_start=very_start)
                         sample_rewards[i] = particle_rewards.mean()
                     else:
                         sample_rewards[i] = terminal_reward_fn(final_state, _, very_start=very_start)
