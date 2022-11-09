@@ -16,7 +16,7 @@ from tqdm import trange
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 NPART = 20 # number of particles
-EPOCHS = 5 # model_train_cfg['epochs']
+EPOCHS = 2 # 5 # model_train_cfg['epochs']
 
 class Dataset:
     def __init__(self, nx, nu):
