@@ -118,9 +118,9 @@ class Tabletop(SawyerXYZEnv):
             np.hstack((self.hand_high, obj_high)),
         )
 
-        self.imsize = 120 # im size for y axis
-        self.imsize_x = int(self.imsize * 1.5) # im size for x axis
-        # self.observation_space = Box(0, 1.0, (self.imsize_x*self.imsize*3, ))
+        self.imsize = 64 # 120 # im size for y axis
+        self.imsize_x = 64 # int(self.imsize * 1.5) # im size for x axis
+        self.observation_space = Box(0, 1.0, (self.imsize_x*self.imsize*3, ))
         self.goal_space = self.observation_space
         
         
@@ -141,6 +141,16 @@ class Tabletop(SawyerXYZEnv):
         file = "../assets_updated/sawyer_xyz/" + self.xml + ".xml"
         filename = os.path.join(dirname, file)
         return filename
+
+    def reset(self):
+        _, _ = self.reset_model()
+        return self.observation()
+
+    def observation(self):
+        # downscale based on size of observation needing to be (64, 64)
+        img = self.get_obs()
+        img = np.array(Image.fromarray(img).resize((64, 64), Image.NEAREST))
+        return img
 
     def _get_low_dim_info(self):
         env_info =  {'mug_x': self.data.qpos[9], 
@@ -189,7 +199,7 @@ class Tabletop(SawyerXYZEnv):
         self.do_simulation([action[-1], -action[-1]])
         self.data.qpos[12:16] = Quaternion(axis = [0,0,1], angle = 0).elements.copy()
 
-        ob = self.get_obs()
+        ob = self.observation()
         reward  = self.compute_reward()
         if self.cur_path_length == self.max_path_length:
             done = True
@@ -276,7 +286,7 @@ class Tabletop(SawyerXYZEnv):
             self.data.qpos[18] = 0
 
         self.sim.forward()
-        o = self.get_obs()
+        o = self.observation()
         if self.epcount % self.log_freq == 0 and not just_restore:
             self.imgs = []
             im = self.sim.render(self.imsize_x, self.imsize, camera_name='cam0')
@@ -320,7 +330,7 @@ class Tabletop(SawyerXYZEnv):
                 print("Got Mujoco Unstable Simulation Warning")
                 continue
         self.sim.forward()
-        o = self.get_obs()
+        o = self.observation()
         return o
     
     def take_steps_and_render(self, obs, actions, set_qpos=None):
