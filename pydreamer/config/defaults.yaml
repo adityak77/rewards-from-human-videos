@@ -104,6 +104,9 @@ defaults:
   env_time_limit: 0
   env_no_terminal: False
 
+tabletop:
+  env_id: Tabletop
+
 minigrid:
   env_id: MiniGrid-MazeS11N-v0
   # Features
