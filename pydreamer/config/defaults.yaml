@@ -111,6 +111,10 @@ tabletop:
   env_action_repeat: 1
   env_no_terminal: True
 
+  # training params
+  batch_length: 20
+  batch_size: 20
+
   # actor critic suggestions from paper/DMC params
   generator_workers: 1
   generator_prefill_steps: 5000

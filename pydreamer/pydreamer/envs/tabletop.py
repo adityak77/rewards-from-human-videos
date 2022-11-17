@@ -110,8 +110,8 @@ class Tabletop(SawyerXYZEnv):
         self.hand_init_pos = np.array(hand_init_pos)
         self.action_rot_scale = 1./10
         self.action_space = Box(
-                np.array([-1, -1, -1, -np.pi, -1]),
-                np.array([1, 1, 1, np.pi, 1]),
+                np.array([-1, -1, -1, -np.pi]),
+                np.array([1, 1, 1, np.pi]),
             )
         self.hand_and_obj_space = Box(
             np.hstack((self.hand_low, obj_low)),
@@ -120,7 +120,7 @@ class Tabletop(SawyerXYZEnv):
 
         self.imsize = 64 # 120 # im size for y axis
         self.imsize_x = 64 # int(self.imsize * 1.5) # im size for x axis
-        self.observation_space = Box(0, 1.0, (self.imsize_x*self.imsize*3, ))
+        # self.observation_space = Box(0, 1.0, (self.imsize_x*self.imsize*3, ))
         self.goal_space = self.observation_space
         
         
@@ -138,18 +138,19 @@ class Tabletop(SawyerXYZEnv):
     @property
     def model_name(self):
         dirname = os.path.dirname(__file__)
-        file = "../assets_updated/sawyer_xyz/" + self.xml + ".xml"
+        file = "assets_updated/sawyer_xyz/" + self.xml + ".xml"
         filename = os.path.join(dirname, file)
         return filename
 
     def reset(self):
-        _, _ = self.reset_model()
-        return self.observation()
+        ob, _ = self.reset_model()
+        ob = {'image': ob}
+        return ob
 
     def observation(self):
         # downscale based on size of observation needing to be (64, 64)
         img = self.get_obs()
-        img = np.array(Image.fromarray(img).resize((64, 64), Image.NEAREST))
+        # img = np.array(Image.fromarray(img).resize((64, 64), Image.NEAREST))
         return img
 
     def _get_low_dim_info(self):
@@ -200,7 +201,7 @@ class Tabletop(SawyerXYZEnv):
         self.data.qpos[12:16] = Quaternion(axis = [0,0,1], angle = 0).elements.copy()
 
         ob = self.observation()
-        reward  = self.compute_reward()
+        ob = {'image': ob}
         if self.cur_path_length == self.max_path_length:
             done = True
         else:
@@ -217,8 +218,30 @@ class Tabletop(SawyerXYZEnv):
 
         self.cur_path_length +=1
         low_dim_info = self._get_low_dim_info()
+        
+        reward = self.reward_push_mug_forward(self.tabletop_obs(low_dim_info)) # self.compute_reward()
         return ob, reward, done, low_dim_info
    
+    def tabletop_obs(self, info):
+        '''
+        Convert env_info outputs from env.step() function into state
+        '''
+        hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
+        mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
+        mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
+        init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
+        return init_low_dim
+
+    def reward_push_mug_forward(self, state):
+        very_start = np.array([0.01174369, 0.50146557, 0.03606395, 0, 0.6, 0, 1, 0, 0, 0, -0.07, 0, 0])
+        x_shift = np.abs(state[3] - very_start[3])
+        forward = -np.abs(state[4] - very_start[4] - 0.115) + 0.115
+
+        penalty = 0 if (x_shift < 0.05) else -100
+        reward = forward + penalty
+
+        return reward
+
     def get_obs(self):
         obs = self.sim.render(self.imsize_x, self.imsize, camera_name="cam0") / 255.
         return obs
