@@ -112,7 +112,7 @@ tabletop:
   env_no_terminal: True
 
   # training params
-  batch_length: 20
+  batch_length: 50
   batch_size: 20
 
   # actor critic suggestions from paper/DMC params
