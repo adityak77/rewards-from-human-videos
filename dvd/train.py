@@ -61,6 +61,8 @@ def main():
         save_dir += '_im' + str(args.im_size)
     if args.just_robot:
         save_dir += '_justrobot'
+    if args.inpaint:
+        save_dir += '_inpainted'
     print(" > Output folder for this run -- {}".format(save_dir))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
