@@ -67,6 +67,70 @@ Run inference using ground truth (my engineered) rewards:
 python cem_plan_open_loop.py --num_tasks 2 --task_id 5 --engineered_rewards
 ```
 
+## Adding State and Visual Dynamics model
+
+State dynamics model using PETS:
+
+```
+conda activate dvd_pets
+cd dvd
+git checkout state_history
+python cem_plan_learned_dynamics.py --task_id 5 --engineered_rewards --learn_dynamics_model
+
+OR 
+
+git checkout visual_dynamics
+python cem_plan_state_dynamics.py --task_id 5 --engineered_rewards --learn_dynamics_model
+```
+
+Training visual dynamics model using pydreamer
+
+```
+conda activate dvd_pydreamer
+cd pydreamer
+git checkout visual_dynamics
+
+CUDA_VISIBLE_DEVICES=0,1 python train.py --configs defaults tabletop --run_name tabletop
+```
+
+Inference with CEM closed loop using visual dynamics model
+
+```
+cd dvd
+[ADD HERE]
+```
+
+## Preparing inpainted data
+
+One can inpaint using the `data_inpaint.py` script as follows:
+
+```
+conda activate e2fgvi
+cd dvd
+
+python data_inpaint.py --human_data_dir /path/to/smthsmth/sm --human_tasks 5 41 94 --opts MODEL.WEIGHTS detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl
+```
+
+## Training and inference on human-only inpainted data
+
+- We might want to train on only human data. In that case, we must set `add_demos` to `0`. Adding the `--inpaint` flag will indicate that we are using inpainted videos and will modify the log file name appropriately.
+
+```
+conda activate dvd_t2t
+cd dvd
+
+python train.py --num_tasks 6 --traj_length 0 --log_dir path/to/train/model/output --similarity --batch_size 24 --im_size 120 --seed 0 --lr 0.01 --pretrained --human_data_dir path/to/smthsmth/sm/20bn-something-something-v2 --human_tasks 5 41 44 46 93 94 --add_demos 0 --inpaint --gpus 0
+```
+
+- To run CEM planning on human-only inpainted data
+
+```
+conda activate dvd_e2fgvi_detectron
+cd dvd
+
+python cem_plan_inpaint.py --task_id 5 --dvd --demo_path demos/task5 --checkpoint /path/to/trained/reward/model
+```
+
 ## WIP
 
 In order to run inference using DVD, we need to use Stochastic Variational Video Predictor (SV2P) from `tensor2tensor`. In order to do this, you need to register the problem `dvd/human_problem.py` first. To do this, run something like 
