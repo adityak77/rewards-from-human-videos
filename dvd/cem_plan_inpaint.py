@@ -173,7 +173,8 @@ if __name__ == '__main__':
             # TODO: Inpaint states here
             # import ipdb; ipdb.set_trace()
             states = (states * 255).astype(np.uint8)
-            states = [inpaint(args, inpaint_model, robot_segmentation_model, sample) for sample in states]
+            states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, sample) for sample in states])
+            
             sample_rewards = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
 
         # update elites
