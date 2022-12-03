@@ -7,6 +7,7 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
 import copy
+import cv2
 
 import argparse
 import logging
@@ -109,16 +110,6 @@ if __name__ == '__main__':
         sim_discriminator = None
         terminal_reward_fn = vip_reward
 
-    if not args.engineered_rewards:
-        if os.path.isdir(args.demo_path):
-            all_demo_names = os.listdir(args.demo_path)
-            demos = [decode_gif(os.path.join(args.demo_path, fname)) for fname in all_demo_names]
-        else:
-            demos = [decode_gif(args.demo_path)]
-
-        # TODO: Inpaint demos here (and maintain same formatting)
-        # import ipdb; ipdb.set_trace()
-        demos = [inpaint(args, inpaint_model, human_segmentation_model, demo) for demo in demos]
 
     # initialization
     actions_mean = torch.zeros(TIMESTEPS * nu)
@@ -140,6 +131,26 @@ if __name__ == '__main__':
     logdir = logdir + f'_run{run}'
     
     cem_logger = CemLogger(logdir)
+
+    if not args.engineered_rewards:
+        if os.path.isdir(args.demo_path):
+            all_demo_names = os.listdir(args.demo_path)
+            demos = [decode_gif(os.path.join(args.demo_path, fname)) for fname in all_demo_names]
+        else:
+            demos = [decode_gif(args.demo_path)]
+
+        # detectron2 input is BGR
+        for i in range(len(demos)):
+            for j in range(len(demos[i])):
+                demos[i][j] = cv2.cvtColor(demos[i][j], cv2.COLOR_RGB2BGR)
+
+        # Inpaint demos here (and maintain same formatting)
+        demos = [inpaint(args, inpaint_model, human_segmentation_model, demo) for demo in demos]
+        # convert back to RGB
+        for i in range(len(demos)):
+            for j in range(len(demos[i])):
+                demos[i][j] = cv2.cvtColor(demos[i][j], cv2.COLOR_BGR2RGB)
+
     for ep in range(NUM_ITERATIONS):
         # env initialization
         env = Tabletop(log_freq=args.env_log_freq, 
@@ -170,10 +181,19 @@ if __name__ == '__main__':
                 sample_rewards[i] = terminal_reward_fn(curr_state, u, very_start=very_start)
 
         if args.dvd or args.vip:
-            # TODO: Inpaint states here
-            # import ipdb; ipdb.set_trace()
+            # Inpaint states here
             states = (states * 255).astype(np.uint8)
+
+            # detectron2 input is BGR
+            for i in range(len(states)):
+                for j in range(len(states[i])):
+                    states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_RGB2BGR)
+
             states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, sample) for sample in states])
+            # convert back to RGB
+            for i in range(len(states)):
+                for j in range(len(states[i])):
+                    states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_BGR2RGB)
             
             sample_rewards = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
 

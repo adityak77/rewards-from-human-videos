@@ -89,7 +89,7 @@ def prepare_results(args):
 
     print('Demo:', args.demo_path)
     demo_gif = decode_gif(args.demo_path)
-    eval_paths = [os.path.join(args.eval_path, 'env', fpath) for fpath in os.listdir(os.path.join(args.eval_path, 'env')) if fpath.endswith('.gif')]
+    eval_paths = [os.path.join(args.eval_path, 'env', fpath) for fpath in os.listdir(os.path.join(args.eval_path, 'env')) if fpath.endswith('.gif') or fpath.endswith('.mp4')]
 
     print('Input Samples', eval_paths)
     test_data = [(demo_gif, decode_gif(fpath)) for fpath in eval_paths]

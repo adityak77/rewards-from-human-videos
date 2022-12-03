@@ -118,9 +118,15 @@ def process_masks(masks, size = None):
 #         else:
 #             break
 
-def get_segmented_frames(video_frames, model, resolution=None, human_filter=False):
+def get_segmented_frames(video_frames, model, model_name, human_filter=False):
+    resolution = None
+    if model_name == 'e2fgvi_hq':
+        height, width = video_frames[0].shape[0], video_frames[0].shape[1]
+        downsample_resolution_factor = max(width // 400 + 1, height // 400 + 1)
+        resolution = width // downsample_resolution_factor, height // downsample_resolution_factor
+
     if resolution:
-        frames = [cv2.resize(frame, dsize=(512, 512), interpolation=cv2.INTER_CUBIC) for frame in video_frames]
+        frames = [cv2.resize(frame, dsize=resolution, interpolation=cv2.INTER_CUBIC) for frame in video_frames]
     else:
         frames = video_frames
 
@@ -158,7 +164,7 @@ def inpaint(args, inpaint_model, segment_model, video_frames):
         size = None
 
     # prepare datset
-    frames, masks = get_segmented_frames(video_frames, segment_model, human_filter=True)
+    frames, masks = get_segmented_frames(video_frames, segment_model, args.model, human_filter=True)
     frames = [Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), mode='RGB') for frame in frames]
 
     frames, size = resize_frames(frames, size)
