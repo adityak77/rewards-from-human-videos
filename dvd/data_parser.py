@@ -45,6 +45,7 @@ class DatasetBase(object):
             if not self.just_robot: #not self.triplet or not self.add_demos: #self.is_val or
                 with open(self.json_path_input, 'rb') as jsonfile:
                     json_reader = json.load(jsonfile)
+                    clean, total = 0, 0
                     for elem in json_reader:
                         label = self.clean_template(elem['template'])
                         if label not in self.classes_dict.keys(): # or label == 'Pushing something so that it slightly moves':
@@ -53,6 +54,14 @@ class DatasetBase(object):
                             raise ValueError("Label mismatch! Please correct")
                         
                         label_num = self.classes_dict[label]
+                        
+                        # path might not exist if it is cleaned out in preprocessing
+                        fpath = os.path.join(self.data_root, elem['id'] + self.extension)
+                        total += 1
+                        if not os.path.exists(fpath):
+                            continue
+                        clean += 1
+
                         item = ListData(elem['id'],
                                         label,
                                         os.path.join(self.data_root,
@@ -61,6 +70,8 @@ class DatasetBase(object):
                         json_data.append(item)
                         self.num_occur[label] += 1
             
+                    print("{} clean videos out of {} videos".format(clean, total))
+
             if self.add_demos: 
                 # Add robot demonstrations or extra robot class to json_data, just use id 300000
                 robot_tasks = self.robot_tasks
@@ -94,6 +105,11 @@ class DatasetBase(object):
             with open(self.json_path_input, 'rb') as jsonfile:
                 json_reader = json.load(jsonfile)
                 for elem in json_reader:
+                    # path might not exist if it is cleaned out in preprocessing
+                    fpath = os.path.join(self.data_root, elem['id'] + self.extension)
+                    if not os.path.exists(fpath):
+                        continue
+                    
                     # add a dummy label for all test samples
                     item = ListData(elem['id'],
                                     "Holding something",
