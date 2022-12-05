@@ -111,6 +111,15 @@ cd dvd
 python data_inpaint.py --human_data_dir /path/to/smthsmth/sm --human_tasks 5 41 94 --opts MODEL.WEIGHTS detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl
 ```
 
+To do this with EgoHOS segmentations instead of Detectron segmentations:
+```
+conda activate dvd_e2fgvi_detectron_egohos
+cd dvd
+
+python data_inpaint_egohos.py --human_data_dir /path/to/smthsmth/sm --human_tasks 5 41 94
+```
+
+
 ## Training and inference on human-only inpainted data
 
 - We might want to train on only human data. In that case, we must set `add_demos` to `0`. Adding the `--inpaint` flag will indicate that we are using inpainted videos and will modify the log file name appropriately.
@@ -130,6 +139,17 @@ cd dvd
 
 python cem_plan_inpaint.py --task_id 5 --dvd --demo_path demos/task5 --checkpoint /path/to/trained/reward/model
 ```
+
+- To do this with EgoHOS segmentations instead of Detectron segmentations:
+```
+conda activate dvd_e2fgvi_detectron_egohos
+cd dvd
+
+python cem_plan_inpaint_egohos.py --task_id 5 --dvd --demo_path demos/task5 --checkpoint /path/to/trained/reward/model
+```
+
+
+
 
 ## WIP
 

@@ -55,8 +55,8 @@ parser.add_argument("--verbose", type=bool, default=1)
 parser.add_argument("--xml", type=str, default='env1')
 
 # E2FGVI args
-parser.add_argument("-c", "--ckpt", type=str, default='/home/akannan2/inpainting/E2FGVI/release_model/E2FGVI-CVPR22.pth')
-parser.add_argument("--model", type=str, default='e2fgvi', choices=['e2fgvi', 'e2fgvi_hq'])
+parser.add_argument("-c", "--ckpt", type=str, default='/home/akannan2/inpainting/E2FGVI/release_model/E2FGVI-HQ-CVPR22.pth')
+parser.add_argument("--model", type=str, default='e2fgvi_hq', choices=['e2fgvi', 'e2fgvi_hq'])
 parser.add_argument("--step", type=int, default=10)
 parser.add_argument("--num_ref", type=int, default=-1)
 parser.add_argument("--neighbor_stride", type=int, default=1)

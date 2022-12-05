@@ -3,6 +3,8 @@
 dvd/mppi/
 dvd/*_plots/
 dvd/data*
+!dvd/data_inpaint*
+
 dvd/test/*
 dvd/tmp
 
