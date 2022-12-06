@@ -130,7 +130,7 @@ class Tabletop(SawyerXYZEnv):
             self.imgs = []
             self.filepath = filepath
             if not os.path.exists(self.filepath):
-                os.mkdir(self.filepath)
+                os.makedirs(self.filepath, exist_ok=True)
         self.log_freq = log_freq
         self.epcount = -1 # num episodes so far 
         self.good_qpos = None
