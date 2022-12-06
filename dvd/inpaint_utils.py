@@ -106,9 +106,9 @@ def process_masks(masks, size = None):
 
         m = np.array(m)
         m = np.array(m > 0).astype(np.uint8)
-        m = cv2.dilate(m,
-                       cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
-                       iterations=4)
+        # m = cv2.dilate(m,
+        #                cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+        #                iterations=4)
         masks_expanded.append(Image.fromarray(m * 255))
 
     return masks_expanded
@@ -148,8 +148,8 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
             for j, cls_id in enumerate(frames_info[i]['instances'].pred_classes):
                 if cls_id == 0:
                     hmask = frames_info[i]['instances'].pred_masks[j]
-                    struct_element = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-                    hmask_processed = cv2.dilate(hmask.cpu().numpy().astype(np.uint8), struct_element, iterations=5).astype(np.bool)
+                    struct_element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+                    hmask_processed = cv2.dilate(hmask.cpu().numpy().astype(np.uint8), struct_element, iterations=2).astype(np.bool)
                     hmask_processed = torch.Tensor(hmask_processed).to(hmask.device)
                     human_masks.append(hmask_processed)
 
