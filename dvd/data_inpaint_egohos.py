@@ -19,9 +19,9 @@ from core.utils import to_tensors
 
 sys.path.append('/home/akannan2/inpainting/EgoHOS/mmsegmentation/')
 from segment_video_hands import segment_video
+from mmseg.apis import init_segmentor
 
 ListData = namedtuple('ListData', ['id', 'label', 'path'])
-
 
 class DatasetBase(object):
     """
@@ -160,7 +160,7 @@ def process_masks(masks, size = None):
     return masks_expanded
 
 
-def inpaint(args, model, video_path, save_path):
+def inpaint(args, model, segmentation_model, video_path, save_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if args.model == "e2fgvi":
@@ -178,7 +178,7 @@ def inpaint(args, model, video_path, save_path):
     # print(
     #     f'Loading videos and masks from: {video_path} | INPUT mp4/gif format: {args.use_mp4}'
     # )
-    frames, masks = segment_video(video_path, args.twohands_config_file, args.twohands_checkpoint_file, catchBadMasks=True)
+    frames, masks = segment_video(video_path, segmentation_model, catchBadMasks=True)
     # Data cleaning - don't process videos with bad segmentations
     if frames is None:
         return
@@ -300,6 +300,8 @@ def main(args):
 
     # get model
     model = get_model(args)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    segmentation_model = init_segmentor(args.twohands_config_file, args.twohands_checkpoint_file, device=device)
 
     # inpaint using model
     for item in tqdm(json_data):
@@ -307,7 +309,7 @@ def main(args):
         filename = os.path.basename(item.path)
         save_path = os.path.join(output_path, filename)
 
-        inpaint(args, model, item.path, save_path)
+        inpaint(args, model, segmentation_model, item.path, save_path)
 
 if __name__ == '__main__':
     # python data_inpaint.py --human_data_dir ../smthsmth/sm2/ --human_tasks 5 41 44 46 93 94 \\
