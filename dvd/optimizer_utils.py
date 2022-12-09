@@ -18,6 +18,9 @@ from multi_column import MultiColumn, SimilarityDiscriminator
 from utils import remove_module_from_checkpoint_state_dict
 from transforms_video import *
 
+import logging
+logging.getLogger('matplotlib.font_manager').disabled = True
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CemLogger():
@@ -199,15 +202,15 @@ def dvd_reward(states, actions, **kwargs):
     demos = kwargs['demos']
     video_encoder = kwargs['video_encoder']
     sim_discriminator = kwargs['sim_discriminator']
-    CHUNKS = 100
+    CHUNK_SIZE = 50 # 100
     
     command_start = time.perf_counter()
     rewards_demo = torch.zeros(states.shape[0])
     for demo in demos:
         reward_list = []
         batch_num = 0
-        while batch_num * CHUNKS < states.shape[0]:
-            loc = slice(batch_num*CHUNKS, max((batch_num+1)*CHUNKS, states.shape[0]))
+        while batch_num * CHUNK_SIZE < states.shape[0]:
+            loc = slice(batch_num*CHUNK_SIZE, min((batch_num+1)*CHUNK_SIZE, states.shape[0]))
             rewards_batch = inference(states[loc], demo, video_encoder, sim_discriminator)
             reward_list.append(rewards_batch.cpu())
             torch.cuda.empty_cache()
