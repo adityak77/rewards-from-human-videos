@@ -240,12 +240,12 @@ def get_segmentation_model_egohos():
 
     return model
 
-def segment_video(reader, model, catchBadMasks=False):
+def segment_video(reader, model, video_path, catchBadMasks=False):
     height, width = reader[0].shape[0], reader[0].shape[1]
     downsample_resolution_factor = max(width // 400 + 1, height // 400 + 1)
     resolution = width // downsample_resolution_factor, height // downsample_resolution_factor
     
-    video_dir = 'tmp/'
+    video_dir = os.path.join(video_path, 'tmp')
     video_image_dir = os.path.join(video_dir, 'images')
     os.makedirs(video_image_dir, exist_ok = True)
     frames = []
@@ -289,7 +289,7 @@ def inpaint_egohos(args, inpaint_model, segment_model, video_frames):
         size = None
 
     # prepare datset
-    frames, masks = segment_video(video_frames, segment_model, catchBadMasks=True)
+    frames, masks = segment_video(video_frames, segment_model, args.demo_path, catchBadMasks=True)
     masks = [torch.tensor(mask, dtype=torch.float, device=device) for mask in masks]
     masks = [mask.expand(3, -1, -1) for mask in masks]
     frames = [Image.fromarray(frame, mode='RGB') for frame in frames]
