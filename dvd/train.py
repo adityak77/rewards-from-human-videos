@@ -62,7 +62,7 @@ def main():
     if args.just_robot:
         save_dir += '_justrobot'
     if args.inpaint:
-        save_dir += '_inpainted'
+        save_dir += '_inpainted_new'
     print(" > Output folder for this run -- {}".format(save_dir))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
