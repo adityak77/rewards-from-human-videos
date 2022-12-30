@@ -1,8 +1,0 @@
-{
-  "Closing something": 1188,
-  "Moving something away from the camera": 1001,
-  "Moving something towards the camera": 853,
-  "Opening something": 1253,
-  "Pushing something from left to right": 3069,
-  "Pushing something from right to left": 2724
-}

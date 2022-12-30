@@ -9,6 +9,7 @@ from PIL import Image
 import time
 from collections import deque
 import warnings
+import random
 
 # from vip import load_vip
 
@@ -34,35 +35,41 @@ class CemLogger():
         if not os.path.isdir(self.logdir_iteration):
             os.makedirs(self.logdir_iteration)
 
-        self.total_successes = 0
         self.total_iterations = 0
-        self.rolling_success = deque()
+        self.total_last_success = 0
+        self.rolling_last_success = deque()
+        self.total_any_timestep_success = 0
+        self.rolling_any_timestep_success = deque()
         self.gt_reward_history = []
         self.succ_rate_history = []
         self.mean_sampled_traj_history = []
 
-    def update(self, gt_reward, succ, mean_sampled_rewards, additional_reward, additional_reward_type):
+    def update(self, gt_reward, last_succ, any_timestep_succ, mean_sampled_rewards, additional_reward, additional_reward_type):
         # print results
-        self.total_successes += succ
         self.total_iterations += 1
-        self.rolling_success.append(succ)
+        self.total_last_success += last_succ
+        self.rolling_last_success.append(last_succ)
+        self.total_any_timestep_success += any_timestep_succ
+        self.rolling_any_timestep_success.append(any_timestep_succ)
 
-        self._display_iteration_result(gt_reward, succ, additional_reward_type, additional_reward)
+        self._display_iteration_result(gt_reward, last_succ, any_timestep_succ, additional_reward_type, additional_reward)
 
-        # if len(self.rolling_success) > 10:
-        #     self.rolling_success.popleft()
+        # if len(self.rolling_last_success) > 10:
+        #     self.rolling_last_success.popleft()
         
-        succ_rate = sum(self.rolling_success) / len(self.rolling_success)
+        succ_rate = sum(self.rolling_any_timestep_success) / len(self.rolling_any_timestep_success)
 
         self.gt_reward_history.append(gt_reward)
         self.succ_rate_history.append(succ_rate)
         self.mean_sampled_traj_history.append(mean_sampled_rewards)
 
 
-    def _display_iteration_result(self, gt_reward, succ, additional_reward_type, additional_reward):
-        result = 'SUCCESS' if succ else 'FAILURE'
-        print(f'----------Iteration done: {result} | gt_reward: {gt_reward:.5f} | {additional_reward_type}_reward {additional_reward:.5f}----------')
-        print(f'----------Currently at {self.total_successes} / {self.total_iterations}----------')
+    def _display_iteration_result(self, gt_reward, last_succ, any_timestep_succ, additional_reward_type, additional_reward):
+        result = 'SUCCESS' if last_succ else 'FAILURE'
+        any_timestep_result = 'SUCCESS' if any_timestep_succ else 'FAILURE'
+        print(f'----------Iteration done: {result} / {any_timestep_result} (any_timestep) | gt_reward: {gt_reward:.5f} | {additional_reward_type}_reward {additional_reward:.5f}----------')
+        print(f'----------Currently at {self.total_last_success} / {self.total_iterations}----------')
+        print(f'----------Currently at {self.total_any_timestep_success} / {self.total_iterations}----------')
 
     def save_graphs(self, all_obs):
         # Saving graphs of results
@@ -106,6 +113,12 @@ class CemLogger():
 
         # store video of trajectory
         imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{self.total_iterations}.gif'), all_obs, fps=20)
+
+def set_all_seeds(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
 def decode_gif(video_path):
     try: 

@@ -7,12 +7,13 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
 import copy
+import pickle
 
 import argparse
 import logging
 
 from sim_env.tabletop import Tabletop
-from optimizer_utils import CemLogger, decode_gif
+from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
 from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
@@ -28,6 +29,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--task_id", type=int, required=True, help="Task to learn a model for")
+parser.add_argument("--seed", type=int, default=-1, help="Random seed >= 0. If seed < 0, then use random seed")
+parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
 # optimizer specific
 parser.add_argument("--learn_dynamics_model", action='store_true', default=False, help='Learn a dynamics model (otherwise use online sampling)')
@@ -57,10 +60,15 @@ if __name__ == '__main__':
     TIMESTEPS = 51 # MPC lookahead - max length of episode
     N_SAMPLES = 100
     NUM_ELITES = 7
-    NUM_ITERATIONS = 100
+    NUM_ITERATIONS = args.num_iter
     nu = 4
 
     dtype = torch.double
+
+    # set random seed
+    if args.seed >= 0:
+        set_all_seeds(args.seed)
+        print(f"Using seed: {args.seed}")
 
     # only one of these reward functions allowed per run
     assert sum([args.engineered_rewards, args.dvd, args.vip]) == 1
@@ -160,11 +168,13 @@ if __name__ == '__main__':
         traj_sample = action_distribution.sample((1,))
 
         states = np.zeros((1, TIMESTEPS, 120, 180, 3))
+        all_low_dim_states = np.zeros((TIMESTEPS, 13))
 
         for t in range(TIMESTEPS):
             action = traj_sample[0, t*nu:(t+1)*nu] # from CEM
             obs, r, done, low_dim_info = env.step(action.cpu().numpy())
             states[0, t] = obs
+            all_low_dim_states[t] = tabletop_obs(low_dim_info)
         tend = time.perf_counter()
 
         # ALL CODE BELOW for logging sampled trajectory
@@ -174,8 +184,31 @@ if __name__ == '__main__':
         else:
             additional_reward = 0 # NA
 
-        low_dim_state = tabletop_obs(low_dim_info)
         # TODO: fix reward section below / integrate with gt rewards above
+        any_timestep_succ = False
+        for t in range(TIMESTEPS):
+            low_dim_state = all_low_dim_states[t]
+            if args.task_id == 94:
+                rew = low_dim_state[3] - very_start[3]
+                gt_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
+                penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
+                success_threshold = 0.05
+            elif args.task_id == 41:
+                rew = low_dim_state[4] - very_start[4]
+                gt_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
+                penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
+                success_threshold = 0.03
+            elif args.task_id == 5:
+                rew = low_dim_state[10]
+                gt_reward = low_dim_state[10]
+                penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
+                success_threshold = -0.01
+            
+            gt_reward += penalty
+            succ = gt_reward > success_threshold
+            any_timestep_succ = any_timestep_succ or succ
+
+        low_dim_state = tabletop_obs(low_dim_info)
         if args.task_id == 94:
             rew = low_dim_state[3] - very_start[3]
             gt_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
@@ -198,8 +231,20 @@ if __name__ == '__main__':
         mean_sampled_rewards = sample_rewards.cpu().numpy().mean()
 
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Object Position Shift: {rew:.6f}")
-        cem_logger.update(gt_reward, succ, mean_sampled_rewards, additional_reward, additional_reward_type)
+        cem_logger.update(gt_reward, succ, any_timestep_succ, mean_sampled_rewards, additional_reward, additional_reward_type)
 
         # logging results
         all_obs = (states[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
+
+        res_dict = {
+            'total_iterations': cem_logger.total_iterations,
+            'total_last_success': cem_logger.total_last_success,
+            'total_any_timestep_success': cem_logger.total_any_timestep_success,
+            'succ_rate_history': cem_logger.succ_rate_history,
+            'gt_reward_history': cem_logger.gt_reward_history,
+            'seed': args.seed,
+        }
+
+        with open(os.path.join(cem_logger.logdir, 'results.pkl'), 'wb') as f:
+            pickle.dump(res_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
