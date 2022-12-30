@@ -38,13 +38,12 @@ def main():
     print('Last timestep success rate')
     for key, val in results_last.items():
         print(key, sum(val) / len(val))
+        print(val)
 
     print('Any timestep success rate')
     for key, val in results_any_timestep.items():
         print(key, sum(val) / len(val))
-
-    print(results_last)
-    print(results_any_timestep)
+        print(val)
 
 if __name__ == '__main__':
     main()
