@@ -1,6 +1,7 @@
 import os
 import importlib
 import glob
+import time
 
 import numpy as np
 import cv2
@@ -13,7 +14,9 @@ from PIL import Image
 import sys
 sys.path.append('/home/akannan2/inpainting/detectron2')
 from detectron2.config import get_cfg
-from detectron2.engine import DefaultPredictor
+# from detectron2.engine import DefaultPredictor
+from detectron2.checkpoint import DetectionCheckpointer
+from detectron2.modeling import build_model
 
 sys.path.append('/home/akannan2/inpainting/E2FGVI/')
 from core.utils import to_tensors
@@ -53,7 +56,13 @@ def get_robot_cfg():
 
 
 def get_segmentation_model(cfg):
-    predictor = DefaultPredictor(cfg)
+    predictor = build_model(cfg)
+    # predictor.to(device)
+    predictor.eval()
+
+    checkpointer = DetectionCheckpointer(predictor)
+    checkpointer.load(cfg.MODEL.WEIGHTS)
+    
     return predictor
 
 def get_inpaint_model(args):
@@ -137,7 +146,23 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     else:
         frames = video_frames
 
-    frames_info = [model(frame) for frame in frames]
+    tic = time.time()
+    # import ipdb; ipdb.set_trace()
+    # frames_info = [model(frame) for frame in frames]
+    with torch.no_grad():
+        frames_input = [{'image': torch.from_numpy(frame.astype('float32').transpose((2, 0, 1))).to(device)} for frame in frames]
+        frames_info = model(frames_input)
+    toc = time.time()
+    print(f'Inference time: {toc - tic}')
+
+    # tic = time.time()
+    # with torch.no_grad():
+    #     frames_input = [{'image': torch.from_numpy(frame.astype('float32').transpose((2, 0, 1))).to(device)} for frame in frames]
+    #     frames_info = [model([frame])[0] for frame in frames_input]
+    # toc = time.time()
+    # print(f'Inference time: {toc - tic}')
+    print(frames_info[0], frames_info[1])
+    import ipdb; ipdb.set_trace()
 
     masks = []
     for i in range(len(frames_info)):
@@ -189,7 +214,7 @@ def inpaint(args, inpaint_model, segment_model, video_frames):
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
-    for f in tqdm(range(0, video_length, args.neighbor_stride)):
+    for f in tqdm(range(0, video_length, args.neighbor_stride), leave=True):
         neighbor_ids = [
             i for i in range(max(0, f - args.neighbor_stride),
                              min(video_length, f + args.neighbor_stride + 1))

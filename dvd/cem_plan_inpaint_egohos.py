@@ -9,6 +9,8 @@ import time
 import copy
 import cv2
 import pickle
+from tqdm import tqdm
+import imageio
 
 import argparse
 import logging
@@ -187,7 +189,13 @@ if __name__ == '__main__':
                 for j in range(len(states[i])):
                     states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_RGB2BGR)
 
-            states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, sample) for sample in states])
+            inpainted_states = []
+            for sample in tqdm(states):
+                inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
+                imageio.mimsave('cem_plots/test.gif', inpainted_states[0])
+                raise Exception
+            states = np.array(inpainted_states)
+
             # convert back to RGB
             for i in range(len(states)):
                 for j in range(len(states[i])):
