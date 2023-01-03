@@ -184,6 +184,11 @@ if __name__ == '__main__':
             # Inpaint states here
             states = (states * 255).astype(np.uint8)
 
+            # reshape trajectories to have 31 timesteps instead of 51
+            downsample = max(1, TIMESTEPS // 30 + 1)
+            downsample_boundary = (TIMESTEPS - 31) * downsample
+            states = np.concatenate((states[:, :downsample_boundary:downsample, :, :, :], states[:, downsample_boundary:, :, :, :]), axis=1)
+
             # detectron2 input is BGR
             for i in range(len(states)):
                 for j in range(len(states[i])):
@@ -193,7 +198,7 @@ if __name__ == '__main__':
             for sample in tqdm(states):
                 inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
                 imageio.mimsave('cem_plots/test.gif', inpainted_states[0])
-                raise Exception
+                # raise Exception
             states = np.array(inpainted_states)
 
             # convert back to RGB

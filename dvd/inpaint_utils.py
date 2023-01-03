@@ -6,17 +6,16 @@ import time
 import numpy as np
 import cv2
 import torch
+from torchvision import transforms as T
 from skimage.io import imsave
 
 from tqdm import tqdm
 from PIL import Image
 
 import sys
-sys.path.append('/home/akannan2/inpainting/detectron2')
 from detectron2.config import get_cfg
-# from detectron2.engine import DefaultPredictor
-from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.modeling import build_model
+from detectron2.checkpoint import DetectionCheckpointer
 
 sys.path.append('/home/akannan2/inpainting/E2FGVI/')
 from core.utils import to_tensors
@@ -56,14 +55,12 @@ def get_robot_cfg():
 
 
 def get_segmentation_model(cfg):
-    predictor = build_model(cfg)
-    # predictor.to(device)
-    predictor.eval()
+    model = build_model(cfg)
+    DetectionCheckpointer(model).load(cfg.MODEL.WEIGHTS)
+    model.eval()
 
-    checkpointer = DetectionCheckpointer(predictor)
-    checkpointer.load(cfg.MODEL.WEIGHTS)
-    
-    return predictor
+    return model
+
 
 def get_inpaint_model(args):
     # set up models
@@ -146,23 +143,22 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     else:
         frames = video_frames
 
-    tic = time.time()
-    # import ipdb; ipdb.set_trace()
-    # frames_info = [model(frame) for frame in frames]
-    with torch.no_grad():
-        frames_input = [{'image': torch.from_numpy(frame.astype('float32').transpose((2, 0, 1))).to(device)} for frame in frames]
-        frames_info = model(frames_input)
-    toc = time.time()
-    print(f'Inference time: {toc - tic}')
+    height, width = frames[0].shape[:2]
+    resize_transform = T.Resize(800) # 800 is the image size for the model
+    transformed_images = resize_transform(torch.from_numpy(np.array(frames).transpose(0, 3, 1, 2)).float())
+    input_frames = [{"image": img, "height": height, "width": width} for img in transformed_images]
 
-    # tic = time.time()
+    with torch.no_grad():
+        frames_info = [model(frame) for frame in input_frames]
+
+    # BATCH_SIZE = 10
+    # frames_info = []
     # with torch.no_grad():
-    #     frames_input = [{'image': torch.from_numpy(frame.astype('float32').transpose((2, 0, 1))).to(device)} for frame in frames]
-    #     frames_info = [model([frame])[0] for frame in frames_input]
-    # toc = time.time()
-    # print(f'Inference time: {toc - tic}')
-    print(frames_info[0], frames_info[1])
-    import ipdb; ipdb.set_trace()
+    #     batches = len(input_frames) // BATCH_SIZE
+    #     for i in range(batches+1):
+    #         start = i * BATCH_SIZE
+    #         end = min((i + 1) * BATCH_SIZE, len(input_frames))
+    #         frames_info += model(input_frames[start : end])
 
     masks = []
     for i in range(len(frames_info)):
