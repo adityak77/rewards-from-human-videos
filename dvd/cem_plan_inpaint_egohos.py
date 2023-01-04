@@ -197,8 +197,6 @@ if __name__ == '__main__':
             inpainted_states = []
             for sample in tqdm(states):
                 inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
-                imageio.mimsave('cem_plots/test.gif', inpainted_states[0])
-                # raise Exception
             states = np.array(inpainted_states)
 
             # convert back to RGB
