@@ -67,10 +67,15 @@ def get_inpaint_model(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     net = importlib.import_module('model.' + args.model)
-    model = net.InpaintGenerator().to(device)
+    model = net.InpaintGenerator()
     data = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(data)
     print(f'Loading model from: {args.ckpt}')
+
+    if torch.cuda.device_count() > 1:
+        print("Using multiple GPUs for inpainting...")
+        model = torch.nn.DataParallel(model)
+    model = model.to(device)
     model.eval()
 
     return model
