@@ -149,7 +149,7 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     input_frames = [{"image": img, "height": height, "width": width} for img in transformed_images]
 
     with torch.no_grad():
-        frames_info = [model(frame) for frame in input_frames]
+        frames_info = [model([frame])[0] for frame in input_frames]
 
     # BATCH_SIZE = 10
     # frames_info = []
