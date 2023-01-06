@@ -184,10 +184,12 @@ if __name__ == '__main__':
             # Inpaint states here
             states = (states * 255).astype(np.uint8)
 
-            # reshape trajectories to have 31 timesteps instead of 51
-            downsample = max(1, TIMESTEPS // 30 + 1)
-            downsample_boundary = (TIMESTEPS - 31) * downsample
-            states = np.concatenate((states[:, :downsample_boundary:downsample, :, :, :], states[:, downsample_boundary:, :, :, :]), axis=1)
+            # reshape trajectories to have 30 timesteps instead of 51
+            downsample = TIMESTEPS // 30 + 1
+            if downsample > 1:
+                downsample_boundary = (TIMESTEPS - 30) // (downsample - 1) * downsample
+                states = np.concatenate((states[:, :downsample_boundary:downsample, :, :, :], states[:, downsample_boundary:, :, :, :]), axis=1)
+                states = states[:, :30, :, :, :]
 
             # detectron2 input is BGR
             for i in range(len(states)):
