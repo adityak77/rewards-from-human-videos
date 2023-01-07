@@ -181,7 +181,7 @@ def inference(states, demo, model, sim_discriminator):
         downsample = len(samples) // 30 + 1
         if downsample > 1: # len(samples) >= 30
             downsample_boundary = (len(samples) - 30) // (downsample - 1) * downsample
-            sample_downsample = torch.cat((samples[:downsample_boundary:downsample], samples[downsample_boundary:]), dim=0)
+            sample_downsample = np.concatenate((samples[:downsample_boundary:downsample], samples[downsample_boundary:]), axis=0)
             sample_downsample = sample_downsample[:30]
         else: # length of samples < 30
             sample_downsample = samples
