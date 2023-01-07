@@ -43,7 +43,8 @@ def load_args():
     parser.add_argument('--similarity', action='store_true', default=False, help='whether to use similarity discriminator')
     parser.add_argument('--demo_batch_val', type=float, default=0.5, help='if using robot demos during sim discriminator training, then value for batching')
     parser.add_argument('--action_dim', type=int, default=5, help='action dim, only used for behavioral cloning baseline (5 for sim, 4 for widowx)')
-    parser.add_argument('--inpaint', action='store_true', default=False, help='to train on human inpainted smth smth videos')
+    parser.add_argument('--inpaint', action='store_true', default=False, help='whether to train on human inpainted smth smth videos')
+    parser.add_argument('--sd_augment', action='store_true', default=False, help='whether to add inpainted smth smth videos augmented with stable diffusion')
     
     args = parser.parse_args()
     args.im_size_x = int(args.im_size * 1.5)
