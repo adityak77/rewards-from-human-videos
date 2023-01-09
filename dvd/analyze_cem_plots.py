@@ -12,7 +12,7 @@ def main():
     results_last = defaultdict(list)
     results_any_timestep = defaultdict(list)
     for file in os.listdir(args.cem_dir):
-        if file.startswith('old_plots'):
+        if file.startswith('old_'):
             continue
         
         file_prefix = '_'.join(file.split('_')[:-1])
