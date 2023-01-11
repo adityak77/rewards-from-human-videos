@@ -14,8 +14,7 @@ from PIL import Image
 
 import sys
 from detectron2.config import get_cfg
-from detectron2.modeling import build_model
-from detectron2.checkpoint import DetectionCheckpointer
+from detectron2.engine import DefaultPredictor
 
 sys.path.append('/home/akannan2/inpainting/E2FGVI/')
 from core.utils import to_tensors
@@ -55,12 +54,8 @@ def get_robot_cfg():
 
 
 def get_segmentation_model(cfg):
-    model = build_model(cfg)
-    DetectionCheckpointer(model).load(cfg.MODEL.WEIGHTS)
-    model.eval()
-
-    return model
-
+    predictor = DefaultPredictor(cfg)
+    return predictor
 
 def get_inpaint_model(args):
     # set up models
@@ -143,23 +138,7 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     else:
         frames = video_frames
 
-    height, width = frames[0].shape[:2]
-    resize_transform = T.Resize(800) # 800 is the image size for the model
-    transformed_images = resize_transform(torch.from_numpy(np.array(frames).transpose(0, 3, 1, 2)).float())
-    input_frames = [{"image": img, "height": height, "width": width} for img in transformed_images]
-
-    with torch.no_grad():
-        frames_info = [model([frame])[0] for frame in input_frames]
-
-    # BATCH_SIZE = 10
-    # frames_info = []
-    # with torch.no_grad():
-    #     batches = len(input_frames) // BATCH_SIZE
-    #     for i in range(batches+1):
-    #         start = i * BATCH_SIZE
-    #         end = min((i + 1) * BATCH_SIZE, len(input_frames))
-    #         frames_info += model(input_frames[start : end])
-
+    frames_info = [model(frame) for frame in frames]
     masks = []
     for i in range(len(frames_info)):
         if not human_filter:
