@@ -177,7 +177,7 @@ def inference(states, demo, model, sim_discriminator):
         K, T, H, W, C = tuple(samples.shape)
 
         samples = np.swapaxes(samples, 0, 1) # shape T x K x H x W x C
-        sample_downsample = samples[1::max(1, len(samples) // 30)][:30] # downsample 30 x K x H x W x C
+        sample_downsample = samples[::max(1, len(samples) // 30)][:30] # downsample 30 x K x H x W x C
         sample_downsample = np.swapaxes(sample_downsample, 0, 1) # shape K x 30 x H x W x C
 
         sample_flattened = np.reshape(sample_downsample, (-1, H, W, C)) # Flatten as (K x 30) x H x W x C

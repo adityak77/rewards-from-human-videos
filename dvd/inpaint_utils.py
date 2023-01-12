@@ -1,17 +1,18 @@
 import os
 import importlib
 import glob
+import time
 
 import numpy as np
 import cv2
 import torch
+from torchvision import transforms as T
 from skimage.io import imsave
 
 from tqdm import tqdm
 from PIL import Image
 
 import sys
-sys.path.append('/home/akannan2/inpainting/detectron2')
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 
@@ -138,7 +139,6 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
         frames = video_frames
 
     frames_info = [model(frame) for frame in frames]
-
     masks = []
     for i in range(len(frames_info)):
         if not human_filter:
@@ -189,7 +189,7 @@ def inpaint(args, inpaint_model, segment_model, video_frames):
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
-    for f in tqdm(range(0, video_length, args.neighbor_stride)):
+    for f in tqdm(range(0, video_length, args.neighbor_stride), leave=True):
         neighbor_ids = [
             i for i in range(max(0, f - args.neighbor_stride),
                              min(video_length, f + args.neighbor_stride + 1))

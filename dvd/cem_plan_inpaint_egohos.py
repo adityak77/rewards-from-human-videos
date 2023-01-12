@@ -9,6 +9,8 @@ import time
 import copy
 import cv2
 import pickle
+from tqdm import tqdm
+import imageio
 
 import argparse
 import logging
@@ -182,12 +184,23 @@ if __name__ == '__main__':
             # Inpaint states here
             states = (states * 255).astype(np.uint8)
 
+            # reshape trajectories to have 30 timesteps instead of 51
+            downsample = TIMESTEPS // 30 + 1
+            if downsample > 1:
+                downsample_boundary = (TIMESTEPS - 30) // (downsample - 1) * downsample
+                states = np.concatenate((states[:, :downsample_boundary:downsample, :, :, :], states[:, downsample_boundary:, :, :, :]), axis=1)
+                states = states[:, :30, :, :, :]
+
             # detectron2 input is BGR
             for i in range(len(states)):
                 for j in range(len(states[i])):
                     states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_RGB2BGR)
 
-            states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, sample) for sample in states])
+            inpainted_states = []
+            for sample in tqdm(states):
+                inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
+            states = np.array(inpainted_states)
+
             # convert back to RGB
             for i in range(len(states)):
                 for j in range(len(states[i])):
