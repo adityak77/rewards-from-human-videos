@@ -36,12 +36,14 @@ def main():
         results_any_timestep[file_prefix].append(any_timestep_success_rate)
 
     print('Last timestep success rate')
-    for key, val in results_last.items():
+    for key in sorted(results_last.keys()):
+        val = results_last[key]
         print(key, sum(val) / len(val))
         print(val)
 
     print('Any timestep success rate')
-    for key, val in results_any_timestep.items():
+    for key in sorted(results_any_timestep.keys()):
+        val = results_any_timestep[key]
         print(key, sum(val) / len(val))
         print(val)
 
