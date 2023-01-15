@@ -18,7 +18,7 @@ import logging
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
-from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
+from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
 from inpaint_utils import get_human_cfg, get_robot_cfg, get_segmentation_model, get_inpaint_model, inpaint, get_segmentation_model_egohos, inpaint_egohos
@@ -231,57 +231,41 @@ if __name__ == '__main__':
             all_low_dim_states[t] = tabletop_obs(low_dim_info)
         tend = time.perf_counter()
 
+        # inpainted executed trajectory
+        if args.dvd or args.vip:
+            # Inpaint states here
+            inpaint_states = (states * 255).astype(np.uint8)
+
+            # detectron2 input is BGR
+            for i in range(len(inpaint_states)):
+                for j in range(len(inpaint_states[i])):
+                    inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_RGB2BGR)
+
+            inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
+
+            # convert back to RGB
+            for i in range(len(inpaint_states)):
+                for j in range(len(inpaint_states[i])):
+                    inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_BGR2RGB)
+
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
         if not args.engineered_rewards:
-            additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(inpaint_states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         else:
             additional_reward = 0 # NA
 
-        # TODO: fix reward section below / integrate with gt rewards above
+        # calculate success and reward of trajectory
         any_timestep_succ = False
         for t in range(TIMESTEPS):
             low_dim_state = all_low_dim_states[t]
-            if args.task_id == 94:
-                rew = low_dim_state[3] - very_start[3]
-                gt_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
-                penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
-                success_threshold = 0.05
-            elif args.task_id == 41:
-                rew = low_dim_state[4] - very_start[4]
-                gt_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
-                penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
-                success_threshold = 0.03
-            elif args.task_id == 5:
-                rew = low_dim_state[10]
-                gt_reward = low_dim_state[10]
-                penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
-                success_threshold = -0.01
+            _, gt_reward, succ = get_success_values(args.task_id, low_dim_state, very_start)
             
-            gt_reward += penalty
-            succ = gt_reward > success_threshold
             any_timestep_succ = any_timestep_succ or succ
 
         low_dim_state = tabletop_obs(low_dim_info)
-        if args.task_id == 94:
-            rew = low_dim_state[3] - very_start[3]
-            gt_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
-            penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
-            success_threshold = 0.05
-        elif args.task_id == 41:
-            rew = low_dim_state[4] - very_start[4]
-            gt_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
-            penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
-            success_threshold = 0.03
-        elif args.task_id == 5:
-            rew = low_dim_state[10]
-            gt_reward = low_dim_state[10]
-            penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
-            success_threshold = -0.01
+        rew, gt_reward, succ = get_success_values(args.task_id, low_dim_state, very_start)
 
-        # calculate success and reward of trajectory
-        gt_reward += penalty
-        succ = gt_reward > success_threshold
         mean_sampled_rewards = sample_rewards.cpu().numpy().mean()
 
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Object Position Shift: {rew:.6f}")
@@ -289,7 +273,7 @@ if __name__ == '__main__':
 
         # logging results
         all_obs = (states[0] * 255).astype(np.uint8)
-        cem_logger.save_graphs(all_obs)
+        cem_logger.save_graphs(all_obs, inpaint_states[0])
 
         res_dict = {
             'total_iterations': cem_logger.total_iterations,

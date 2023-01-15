@@ -189,7 +189,7 @@ def inpaint(args, inpaint_model, segment_model, video_frames):
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
-    for f in tqdm(range(0, video_length, args.neighbor_stride), leave=True):
+    for f in range(0, video_length, args.neighbor_stride):
         neighbor_ids = [
             i for i in range(max(0, f - args.neighbor_stride),
                              min(video_length, f + args.neighbor_stride + 1))

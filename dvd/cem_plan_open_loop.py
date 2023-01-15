@@ -15,7 +15,7 @@ import logging
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
-from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
+from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,8 @@ if __name__ == '__main__':
         logdir = args.checkpoint.split('/')[1]
     elif args.vip:
         logdir = 'vip2'
+
+    logdir += '_' + args.demo_path.split('/')[-1]
     
     logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
@@ -184,50 +186,17 @@ if __name__ == '__main__':
         else:
             additional_reward = 0 # NA
 
-        # TODO: fix reward section below / integrate with gt rewards above
+        # calculate success and reward of trajectory
         any_timestep_succ = False
         for t in range(TIMESTEPS):
             low_dim_state = all_low_dim_states[t]
-            if args.task_id == 94:
-                rew = low_dim_state[3] - very_start[3]
-                gt_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
-                penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
-                success_threshold = 0.05
-            elif args.task_id == 41:
-                rew = low_dim_state[4] - very_start[4]
-                gt_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
-                penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
-                success_threshold = 0.03
-            elif args.task_id == 5:
-                rew = low_dim_state[10]
-                gt_reward = low_dim_state[10]
-                penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
-                success_threshold = -0.01
+            _, gt_reward, succ = get_success_values(args.task_id, low_dim_state, very_start)
             
-            gt_reward += penalty
-            succ = gt_reward > success_threshold
             any_timestep_succ = any_timestep_succ or succ
 
         low_dim_state = tabletop_obs(low_dim_info)
-        if args.task_id == 94:
-            rew = low_dim_state[3] - very_start[3]
-            gt_reward = -np.abs(low_dim_state[3] - very_start[3] - 0.15) + 0.15
-            penalty = 0 if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
-            success_threshold = 0.05
-        elif args.task_id == 41:
-            rew = low_dim_state[4] - very_start[4]
-            gt_reward = -np.abs(low_dim_state[4] - very_start[4] - 0.115) + 0.115
-            penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
-            success_threshold = 0.03
-        elif args.task_id == 5:
-            rew = low_dim_state[10]
-            gt_reward = low_dim_state[10]
-            penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
-            success_threshold = -0.01
+        rew, gt_reward, succ = get_success_values(args.task_id, low_dim_state, very_start)
 
-        # calculate success and reward of trajectory
-        gt_reward += penalty
-        succ = gt_reward > success_threshold
         mean_sampled_rewards = sample_rewards.cpu().numpy().mean()
 
         logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Object Position Shift: {rew:.6f}")

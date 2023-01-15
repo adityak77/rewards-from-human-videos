@@ -71,7 +71,7 @@ class CemLogger():
         print(f'----------Currently at {self.total_last_success} / {self.total_iterations}----------')
         print(f'----------Currently at {self.total_any_timestep_success} / {self.total_iterations}----------')
 
-    def save_graphs(self, all_obs):
+    def save_graphs(self, all_obs, all_obs_inpainted):
         # Saving graphs of results
 
         # ground truth rewards
@@ -113,6 +113,7 @@ class CemLogger():
 
         # store video of trajectory
         imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{self.total_iterations}.gif'), all_obs, fps=20)
+        imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{self.total_iterations}_inpainted.gif'), all_obs_inpainted, fps=20)
 
 def set_all_seeds(seed):
     torch.manual_seed(seed)
@@ -215,20 +216,11 @@ def dvd_reward(states, actions, **kwargs):
     demos = kwargs['demos']
     video_encoder = kwargs['video_encoder']
     sim_discriminator = kwargs['sim_discriminator']
-    CHUNK_SIZE = 50 # 100
     
     command_start = time.perf_counter()
     rewards_demo = torch.zeros(states.shape[0])
     for demo in demos:
-        reward_list = []
-        batch_num = 0
-        while batch_num * CHUNK_SIZE < states.shape[0]:
-            loc = slice(batch_num*CHUNK_SIZE, min((batch_num+1)*CHUNK_SIZE, states.shape[0]))
-            rewards_batch = inference(states[loc], demo, video_encoder, sim_discriminator)
-            reward_list.append(rewards_batch.cpu())
-            torch.cuda.empty_cache()
-            batch_num += 1
-
+        reward_list = [inference(sample[None], demo, video_encoder, sim_discriminator).cpu() for sample in states]
         rewards_demo += torch.cat(reward_list, dim=0)
     rewards = rewards_demo / len(demos)
     elapsed = time.perf_counter() - command_start
@@ -400,6 +392,28 @@ def tabletop_obs(info):
     mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
     init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
     return init_low_dim
+
+def get_success_values(task_id, low_dim_state, very_start):
+    if task_id == 94:
+        rew = low_dim_state[3] - very_start[3]
+        gt_reward = -np.abs(rew - 0.15) + 0.15
+        penalty = 0 # if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
+        success_threshold = 0.05
+    elif task_id == 41:
+        rew = low_dim_state[4] - very_start[4]
+        gt_reward = -np.abs(rew - 0.115) + 0.115
+        penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
+        success_threshold = 0.03
+    elif task_id == 5:
+        rew = low_dim_state[10]
+        gt_reward = low_dim_state[10]
+        penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
+        success_threshold = -0.01
+
+    gt_reward += penalty
+    succ = gt_reward > success_threshold
+
+    return rew, gt_reward, succ
 
 def _no_grad_trunc_normal(sz, mean, std, a, b):
     # Method based on later version of pytorch with same name
