@@ -71,7 +71,7 @@ class CemLogger():
         print(f'----------Currently at {self.total_last_success} / {self.total_iterations}----------')
         print(f'----------Currently at {self.total_any_timestep_success} / {self.total_iterations}----------')
 
-    def save_graphs(self, all_obs, all_obs_inpainted):
+    def save_graphs(self, all_obs, all_obs_inpainted=None):
         # Saving graphs of results
 
         # ground truth rewards
@@ -113,7 +113,8 @@ class CemLogger():
 
         # store video of trajectory
         imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{self.total_iterations}.gif'), all_obs, fps=20)
-        imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{self.total_iterations}_inpainted.gif'), all_obs_inpainted, fps=20)
+        if all_obs_inpainted is not None:
+            imageio.mimsave(os.path.join(self.logdir_iteration, f'iteration{self.total_iterations}_inpainted.gif'), all_obs_inpainted, fps=20)
 
 def set_all_seeds(seed):
     torch.manual_seed(seed)
@@ -396,7 +397,7 @@ def tabletop_obs(info):
 def get_success_values(task_id, low_dim_state, very_start):
     if task_id == 94:
         rew = low_dim_state[3] - very_start[3]
-        gt_reward = -np.abs(rew - 0.15) + 0.15
+        gt_reward = rew
         penalty = 0 # if (np.abs(low_dim_state[10] - very_start[10]) < 0.03 and low_dim_state[12] < 0.01) else -100
         success_threshold = 0.05
     elif task_id == 41:
