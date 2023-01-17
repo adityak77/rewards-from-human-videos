@@ -346,7 +346,6 @@ def inpaint_egohos(args, inpaint_model, segment_model, video_frames):
     
     ret_frames = []
     for f in range(video_length):
-        comp = comp_frames[f].astype(np.uint8)
-        ret_frames.append(cv2.cvtColor(comp, cv2.COLOR_BGR2RGB))
+        ret_frames.append(comp_frames[f].astype(np.uint8))
 
     return ret_frames
