@@ -51,6 +51,7 @@ parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_
 parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
 parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
 parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks') # needs to exist for MultiColumn init
+parser.add_argument('--no_robot_inpaint', action='store_true', default=False, help='do not inpaint robot (for speed)')
 
 # env initialization
 parser.add_argument("--log_dir", type=str, default="mppi")
@@ -131,6 +132,9 @@ if __name__ == '__main__':
         logdir = args.checkpoint.split('/')[1]
     elif args.vip:
         logdir = 'vip2'
+
+    if args.no_robot_inpaint:
+        logdir = 'no_robot_inpaint_' + logdir
     
     logdir = 'inpaint_egohos_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
@@ -191,20 +195,21 @@ if __name__ == '__main__':
                 states = np.concatenate((states[:, :downsample_boundary:downsample, :, :, :], states[:, downsample_boundary:, :, :, :]), axis=1)
                 states = states[:, :30, :, :, :]
 
-            # detectron2 input is BGR
-            for i in range(len(states)):
-                for j in range(len(states[i])):
-                    states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_RGB2BGR)
+            if not args.no_robot_inpaint:
+                # detectron2 input is BGR
+                for i in range(len(states)):
+                    for j in range(len(states[i])):
+                        states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_RGB2BGR)
 
-            inpainted_states = []
-            for sample in tqdm(states):
-                inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
-            states = np.array(inpainted_states)
+                inpainted_states = []
+                for sample in tqdm(states):
+                    inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
+                states = np.array(inpainted_states)
 
-            # convert back to RGB
-            for i in range(len(states)):
-                for j in range(len(states[i])):
-                    states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_BGR2RGB)
+                # convert back to RGB
+                for i in range(len(states)):
+                    for j in range(len(states[i])):
+                        states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_BGR2RGB)
             
             sample_rewards = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
 
@@ -236,17 +241,18 @@ if __name__ == '__main__':
             # Inpaint states here
             inpaint_states = (states * 255).astype(np.uint8)
 
-            # detectron2 input is BGR
-            for i in range(len(inpaint_states)):
-                for j in range(len(inpaint_states[i])):
-                    inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_RGB2BGR)
+            if not args.no_robot_inpaint:
+                # detectron2 input is BGR
+                for i in range(len(inpaint_states)):
+                    for j in range(len(inpaint_states[i])):
+                        inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_RGB2BGR)
 
-            inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
+                inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
 
-            # convert back to RGB
-            for i in range(len(inpaint_states)):
-                for j in range(len(inpaint_states[i])):
-                    inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_BGR2RGB)
+                # convert back to RGB
+                for i in range(len(inpaint_states)):
+                    for j in range(len(inpaint_states[i])):
+                        inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_BGR2RGB)
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
@@ -273,7 +279,8 @@ if __name__ == '__main__':
 
         # logging results
         all_obs = (states[0] * 255).astype(np.uint8)
-        cem_logger.save_graphs(all_obs, inpaint_states[0])
+        all_obs_inpainted = None if args.no_robot_inpaint else inpaint_states[0]
+        cem_logger.save_graphs(all_obs, all_obs_inpainted)
 
         res_dict = {
             'total_iterations': cem_logger.total_iterations,
