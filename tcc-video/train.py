@@ -107,7 +107,6 @@ def main():
                              is_val=False,
                              transform_pre=transform_train_pre,
                              transform_post=transform_post,
-                             robot_demo_transform=robot_demo_transform,
                              )
 
     print(" > Using {} processes for data loader.".format(2))
@@ -129,7 +128,6 @@ def main():
                            is_val=True,
                            transform_pre=transform_eval_pre,
                            transform_post=transform_post,
-                           robot_demo_transform=robot_demo_transform,
                            )
 
     val_loader = torch.utils.data.DataLoader(
