@@ -119,6 +119,25 @@ defaults:
   env_time_limit: 0
   env_no_terminal: False
 
+tabletop:
+  env_id: Tabletop
+  action_dim: 4
+  env_time_limit: 50 # run for 50 timesteps
+  env_action_repeat: 1
+  env_no_terminal: True
+
+  # training params
+  batch_length: 50
+  batch_size: 20
+
+  # actor critic suggestions from paper/DMC params
+  generator_workers: 1
+  generator_prefill_steps: 5000
+  entropy: 1.0e-4
+  actor_grad: dynamics
+  actor_dist: tanh_normal
+  clip_rewards: tanh
+
 minigrid:
   env_id: MiniGrid-MazeS11N-v0
   # Features

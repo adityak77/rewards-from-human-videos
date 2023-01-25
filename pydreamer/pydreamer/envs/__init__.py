@@ -10,7 +10,11 @@ from .wrappers import *
 
 def create_env(env_id: str, no_terminal: bool, env_time_limit: int, env_action_repeat: int, worker_id: int):
 
-    if env_id.startswith('MiniGrid-'):
+    if env_id == 'Tabletop':
+        from .tabletop import Tabletop
+        env = Tabletop(xml='env1', verbose=0)
+
+    elif env_id.startswith('MiniGrid-'):
         from .minigrid import MiniGrid
         env = MiniGrid(env_id)
 
