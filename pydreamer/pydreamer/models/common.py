@@ -41,14 +41,16 @@ class MLP(nn.Module):
         self.out_dim = out_dim
         norm = nn.LayerNorm if layer_norm else NoNorm
         layers = []
+        dim = in_dim
         for i in range(hidden_layers):
             layers += [
-                nn.Linear(in_dim if i == 0 else hidden_dim, hidden_dim),
+                nn.Linear(dim, hidden_dim),
                 norm(hidden_dim, eps=1e-3),
                 activation()
             ]
+            dim = hidden_dim
         layers += [
-            nn.Linear(hidden_dim, out_dim),
+            nn.Linear(dim, out_dim),
         ]
         if out_dim == 1:
             layers += [
@@ -74,11 +76,11 @@ class NoNorm(nn.Module):
 
 class CategoricalSupport(D.Categorical):
 
-    def __init__(self, logits, support):
-        assert logits.shape[-1:] == support.shape
+    def __init__(self, logits, sup):
+        assert logits.shape[-1:] == sup.shape
         super().__init__(logits=logits)
-        self.support = support
+        self.sup = sup
 
     @property
     def mean(self):
-        return torch.einsum('...i,i->...', self.probs, self.support)
+        return torch.einsum('...i,i->...', self.probs, self.sup)

@@ -2,6 +2,7 @@ __pycache__/
 *.egg-info
 data/*
 log/
+logs/
 mlruns/
 
 _*.*
@@ -14,4 +15,5 @@ _*.*
 
 results/
 !config/*.yaml
+!config/.local
 !.gcs_credentials

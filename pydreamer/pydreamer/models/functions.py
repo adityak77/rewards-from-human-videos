@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Tuple, TypeVar, Union
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, Union
 import numpy as np
 import torch
 import torch.nn as nn
@@ -129,7 +129,7 @@ def cat_structure_np(datas: List[Dict[str, np.ndarray]]) -> Dict[str, np.ndarray
     keys = set(datas[0].keys())
     for d in datas[1:]:
         keys.intersection_update(d.keys())
-    return {  # type: ignore
+    return {
         k: np.concatenate([d[k] for d in datas])
         for k in keys
     }
@@ -140,7 +140,7 @@ def stack_structure_np(datas: Tuple[Dict[str, np.ndarray]]) -> Dict[str, np.ndar
     keys = set(datas[0].keys())
     for d in datas[1:]:
         keys.intersection_update(d.keys())
-    return {  # type: ignore
+    return {
         key: np.stack([d[key] for d in datas])
         for key in keys
     }
@@ -148,3 +148,13 @@ def stack_structure_np(datas: Tuple[Dict[str, np.ndarray]]) -> Dict[str, np.ndar
 
 def nanmean(x: Tensor) -> Tensor:
     return torch.nansum(x) / (~torch.isnan(x)).sum()
+
+
+def clip_rewards_np(x: np.ndarray, type_: Optional[str] = None) -> np.ndarray:
+    if not type_:
+        return x
+    if type_ == 'tanh':
+        return np.tanh(x)
+    if type_ == 'log1p':  # TODO: log1p->symlog 
+        return np.log1p(x)
+    assert False, type_

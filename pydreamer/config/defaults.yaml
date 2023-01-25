@@ -1,9 +1,7 @@
 defaults:
   # Job
-  n_steps: 1_000_000
+  n_steps: 100_000_000
   n_env_steps: 1_000_000_000
-  run_name:
-  resume_id:
   offline_data_dir:
   offline_prefill_dir:
   offline_test_dir:
@@ -13,6 +11,7 @@ defaults:
   save_interval: 500
   eval_interval: 2000
   data_workers: 4
+  allow_mid_reset: True
   enable_profiler: False
   verbose: False
 
@@ -33,6 +32,7 @@ defaults:
   
   # Training
   buffer_size: 10_000_000
+  buffer_size_offline: 0
   reset_interval: 200
   iwae_samples: 1
   kl_balance: 0.8
@@ -46,8 +46,8 @@ defaults:
   adam_lr_critic: 1.0e-4
   adam_eps: 1.0e-5
   keep_state: True
-  batch_length: 50
-  batch_size: 50
+  batch_length: 48
+  batch_size: 32
   device: "cuda:0"
   grad_clip: 200
   grad_clip_ac: 200
@@ -58,9 +58,11 @@ defaults:
   # Eval
   test_batches: 61  # For unbiased test needs to be enough to cover full episodes
   test_batch_size: 10  # Smaller for faster test
+  test_save_size: 1
   eval_batches: 61  # Big enough to reach episode end (xN). +1 to log last episode
-  eval_samples: 10  # Big enough for good sampling
-  eval_batch_size: 10  # Limited by GPU mem
+  eval_samples: 1  # no multi-sampling to have reproducible paper results
+  eval_batch_size: 32  # Limited by GPU mem
+  eval_save_size: 1  # How many envs to save in npz
 
   # Model
   model: dreamer
@@ -81,7 +83,8 @@ defaults:
   reward_decoder_layers: 4
   reward_decoder_categorical:
   terminal_decoder_layers: 4
-  map_stoch_dim: 64
+  
+  # Probe
   probe_model: none
   map_decoder: dense
   map_hidden_layers: 4
@@ -96,10 +99,18 @@ defaults:
   actor_grad: reinforce
   actor_dist: onehot
 
+  # Auxiliary Actor critic
+  aux_critic: False
+  aux_critic_weight: 1.0
+  gamma_aux: 0.99
+  lambda_gae_aux: 0.95
+  target_interval_aux: 1000
+
   # Generator
-  generator_workers: 4
-  generator_workers_eval: 1
-  generator_prefill_steps: 200_000
+  generator_workers: 8        # train+eval generators
+  generator_workers_train: 0  # train-only generators
+  generator_workers_eval: 0   # eval-only generators
+  generator_prefill_steps: 50_000
   generator_prefill_policy: random
   limit_step_ratio: 0
   env_id:
@@ -107,25 +118,6 @@ defaults:
   env_action_repeat: 1
   env_time_limit: 0
   env_no_terminal: False
-
-tabletop:
-  env_id: Tabletop
-  action_dim: 4
-  env_time_limit: 50 # run for 50 timesteps
-  env_action_repeat: 1
-  env_no_terminal: True
-
-  # training params
-  batch_length: 50
-  batch_size: 20
-
-  # actor critic suggestions from paper/DMC params
-  generator_workers: 1
-  generator_prefill_steps: 5000
-  entropy: 1.0e-4
-  actor_grad: dynamics
-  actor_dist: tanh_normal
-  clip_rewards: tanh
 
 minigrid:
   env_id: MiniGrid-MazeS11N-v0
@@ -149,26 +141,51 @@ minigrid:
   imag_horizon: 1
 
 miniworld:
-  env_id: MiniWorld-MazeS7GridA4C-v0
-  data_workers: 6
+  # Env
+  env_id: MiniWorld-ScavengerHuntSmall-v0
+  env_no_terminal: True
+  map_size: 9
+  map_channels: 14
+  action_dim: 3
   # Features
   image_key: image
   image_size: 64
   image_channels: 3
   image_categorical: False
   map_key: map
-  map_size: 13
-  map_channels: 4
   map_categorical: True
-  action_dim: 3
   reward_input: True
   # Model
-  probe_model: map
+  probe_model: goals
   cnn_depth: 32
-  imag_horizon: 1
+  data_workers: 6
+
+miniworld_offline:
+  # Env
+  env_id: MiniWorld-ScavengerHuntSmall-v0
+  env_no_terminal: True
+  map_size: 9
+  map_channels: 14
+  action_dim: 3
+  # Features
+  image_key: image
+  image_size: 64
+  image_channels: 3
+  image_categorical: False
+  map_key: map
+  map_categorical: True
+  reward_input: True
+  # Model
+  probe_model: goals
+  cnn_depth: 32
+  data_workers: 6
+  # Offline
+  allow_mid_reset: False
+  reward_decoder_layers: 1  # faster
+  terminal_decoder_layers: 1  # faster
+  imag_horizon: 1  # faster
 
 atari:
-  n_steps: 99_000_000
   n_env_steps: 200_000_000
   # Env
   env_id: Atari-Pong
@@ -176,7 +193,6 @@ atari:
   env_action_repeat: 4
   env_time_limit: 27_000  # =108_000/action_repeat = 30 minutes of game play.
   generator_workers: 1
-  generator_prefill_steps: 50_000
   clip_rewards: tanh
   # Model
   deter_dim: 1024
@@ -201,6 +217,11 @@ dmlab:
   action_dim: 15
   env_action_repeat: 4
   env_no_terminal: True
+  kl_weight: 3.0
+
+dmmemory:
+  env_id: DMM-spot_diff_passive_train
+  action_dim: 9
   kl_weight: 3.0
 
 dmlab_offline:

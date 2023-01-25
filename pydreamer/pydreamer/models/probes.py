@@ -103,9 +103,9 @@ class GoalsProbe(nn.Module):
             assert isinstance(decoder, DenseNormalDecoder)
             target = obs[key]
             _, loss, pred = decoder.training_step(features, target)
-            loss = loss.mean()
-            loss_total += loss
-            metrics[f'loss_{key}'] = loss.detach()
+            loss_total += loss.mean()
+            metrics[f'loss_{key}'] = loss.detach().mean()
+            tensors[f'loss_{key}'] = loss.detach()
             tensors[f'{key}_pred'] = pred.detach()
 
         # Calculate MSE metrics

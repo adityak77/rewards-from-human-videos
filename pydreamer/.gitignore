@@ -2,6 +2,7 @@ __pycache__/
 *.egg-info
 data/*
 log/
+logs/
 mlruns/
 
 _*.*
@@ -11,3 +12,5 @@ _*.*
 !.gitignore
 !.dockerignore
 !data/minerl_*.npy
+
+embodied/

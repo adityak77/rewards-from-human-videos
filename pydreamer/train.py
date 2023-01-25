@@ -1,30 +1,18 @@
-import argparse
-import logging
-import logging.config
-import os
-import sys
 import time
-from distutils.util import strtobool
 from collections import defaultdict
 from datetime import datetime
-from itertools import chain
 from logging import critical, debug, error, info, warning
-from multiprocessing import Process
-from pathlib import Path
 from typing import Iterator, Optional
 
 import mlflow
 import numpy as np
 import scipy.special
 import torch
-import torch.distributions as D
-import torch.nn as nn
-from torch import Tensor, tensor
+from torch import Tensor
 from torch.cuda.amp import GradScaler, autocast
 from torch.profiler import ProfilerActivity
 from torch.utils.data import DataLoader
 
-import generator
 from pydreamer import tools
 from pydreamer.data import DataSequential, MlflowEpisodeRepository
 from pydreamer.models import *
@@ -32,154 +20,104 @@ from pydreamer.models.functions import map_structure, nanmean
 from pydreamer.preprocessing import Preprocessor, WorkerInfoPreprocess
 from pydreamer.tools import *
 
-torch.distributions.Distribution.set_default_validate_args(False)
-torch.backends.cudnn.benchmark = True  # type: ignore
-
 
 def run(conf):
-    mlflow_start_or_resume(conf.run_name or conf.resume_id, conf.resume_id)
-    try:
-        mlflow.log_params({k: v for k, v in vars(conf).items() if not len(repr(v)) > 250})  # filter too long
-    except Exception as e:
-        # This happens when resuming and config has different parameters - it's fine
-        error(f'ERROR in mlflow.log_params: {repr(e)}')
+    
+    configure_logging(prefix='[TRAIN]')
+    mlrun = mlflow_init()
+    artifact_uri = mlrun.info.artifact_uri
 
+    torch.distributions.Distribution.set_default_validate_args(False)
+    torch.backends.cudnn.benchmark = True  # type: ignore
     device = torch.device(conf.device)
-
-    # Generator / Agent
-
-    input_dirs = []
-    eval_dirs = []
-    subprocesses: list[Process] = []
-    artifact_uri: str = mlflow.active_run().info.artifact_uri  # type: ignore
+    
+    # Data directories
 
     if conf.offline_data_dir:
-        # Offline data
-
-        input_dirs.extend(to_list(conf.offline_data_dir))
         online_data = False
-
+        input_dirs = to_list(conf.offline_data_dir)
     else:
-        # Online data
-
         online_data = True
-
-        # Prefill
-
-        if conf.offline_prefill_dir:
-            # Prefill with existing offline data
-            input_dirs.extend(to_list(conf.offline_prefill_dir))
-        else:
-            # Prefill with random policy
-            info(f'Generator prefilling random data ({conf.generator_prefill_steps} steps)...')
-            for i in range(conf.generator_workers):
-                p = run_generator(conf.env_id,
-                                  conf,
-                                  f'{artifact_uri}/episodes/{i}',
-                                  worker_id=i,
-                                  policy=conf.generator_prefill_policy,
-                                  num_steps=conf.generator_prefill_steps // conf.generator_workers)
-                subprocesses.append(p)
-            # wait
-            while any(p.is_alive() for p in subprocesses):
-                time.sleep(1)
-            subprocesses.clear()
-
-        if conf.n_env_steps // conf.env_action_repeat <= conf.generator_prefill_steps:
-            # This is a legit case when generating offline data - it's a prefill-only job
-            info(f'Requested {conf.n_env_steps} steps, prefilled {conf.generator_prefill_steps} x{conf.env_action_repeat} - DONE')
-            return
-
-        # Agents
-
-        info('Starting agent generators...')
-        for i in range(conf.generator_workers):
-            # If eval environment is the same, we can use one agent for both train and eval data
-            share_eval_generator = not conf.env_id_eval
-            if share_eval_generator:
-                # One train+eval generator
-                p = run_generator(conf.env_id,
-                                  conf,
-                                  save_uri=f'{artifact_uri}/episodes/{i}',
-                                  save_uri2=f'{artifact_uri}/episodes_eval/{i}',
-                                  num_steps=(conf.n_env_steps // conf.env_action_repeat - conf.generator_prefill_steps) // conf.generator_workers,
-                                  limit_step_ratio=conf.limit_step_ratio // conf.generator_workers,
-                                  worker_id=i,
-                                  policy='network',
-                                  split_fraction=0.1)
-                input_dirs.append(f'{artifact_uri}/episodes/{i}')
-                eval_dirs.append(f'{artifact_uri}/episodes_eval/{i}')
-            else:
-                # Separate train generator
-                p = run_generator(conf.env_id,
-                                  conf,
-                                  f'{artifact_uri}/episodes/{i}',
-                                  num_steps=(conf.n_env_steps // conf.env_action_repeat - conf.generator_prefill_steps) // conf.generator_workers,
-                                  limit_step_ratio=conf.limit_step_ratio // conf.generator_workers,
-                                  worker_id=i,
-                                  policy='network')
-                input_dirs.append(f'{artifact_uri}/episodes/{i}')
-            subprocesses.append(p)
-
-    # Eval data
+        input_dirs = [
+            f'{artifact_uri}/episodes/{i}'
+            for i in range(max(conf.generator_workers_train, conf.generator_workers))
+        ]
+    
+    if conf.offline_prefill_dir:
+        input_dirs.extend(to_list(conf.offline_prefill_dir))
 
     if conf.offline_eval_dir:
-        eval_dirs.extend(to_list(conf.offline_eval_dir))
+        eval_dirs = to_list(conf.offline_eval_dir)
     else:
-        if not eval_dirs:
-            # Separate eval generator
-            info('Starting eval generator...')
-            for i in range(conf.generator_workers_eval):
-                p = run_generator(conf.env_id_eval or conf.env_id,
-                                  conf,
-                                  f'{artifact_uri}/episodes_eval/{i}',
-                                  worker_id=99 - i,
-                                  policy='network',
-                                  metrics_prefix='agent_eval')
-                eval_dirs.append(f'{artifact_uri}/episodes_eval/{i}')
-                subprocesses.append(p)
+        eval_dirs = [
+            f'{artifact_uri}/episodes_eval/{i}'
+            for i in range(max(conf.generator_workers_eval, conf.generator_workers))
+        ]
 
     if conf.offline_test_dir:
         test_dirs = to_list(conf.offline_test_dir)
     else:
         test_dirs = eval_dirs
 
+    # Wait for prefill
+
+    if online_data:
+        while True:
+            data_train_stats = DataSequential(MlflowEpisodeRepository(input_dirs), conf.batch_length, conf.batch_size, check_nonempty=False)
+            mlflow_log_metrics({
+                'train/data_steps': data_train_stats.stats_steps,
+                'train/data_env_steps': data_train_stats.stats_steps * conf.env_action_repeat,
+                '_timestamp': datetime.now().timestamp(),
+            }, step=0)
+            if data_train_stats.stats_steps < conf.generator_prefill_steps:
+                debug(f'Waiting for prefill: {data_train_stats.stats_steps}/{conf.generator_prefill_steps} steps...')
+                time.sleep(10)
+            else:
+                info(f'Done prefilling: {data_train_stats.stats_steps}/{conf.generator_prefill_steps} steps.')
+                break
+
+        if data_train_stats.stats_steps * conf.env_action_repeat >= conf.n_env_steps:
+            # Prefill-only job, or resumed already finished job
+            info(f'Finished {conf.n_env_steps} env steps.')
+            return
+
     # Data reader
 
-    repository = MlflowEpisodeRepository(input_dirs)
-    data = DataSequential(repository,
+    data = DataSequential(MlflowEpisodeRepository(input_dirs),
                           conf.batch_length,
                           conf.batch_size,
                           skip_first=True,
                           reload_interval=120 if online_data else 0,
-                          buffer_size=conf.buffer_size if online_data else 0,
-                          reset_interval=conf.reset_interval)
+                          buffer_size=conf.buffer_size if online_data else conf.buffer_size_offline,
+                          reset_interval=conf.reset_interval,
+                          allow_mid_reset=conf.allow_mid_reset)
     preprocess = Preprocessor(image_categorical=conf.image_channels if conf.image_categorical else None,
                               image_key=conf.image_key,
                               map_categorical=conf.map_channels if conf.map_categorical else None,
                               map_key=conf.map_key,
                               action_dim=conf.action_dim,
                               clip_rewards=conf.clip_rewards,
-                              amp=conf.device.startswith('cuda') and conf.amp)
+                              amp=conf.amp and device.type == 'cuda')
 
     # MODEL
 
     if conf.model == 'dreamer':
         model = Dreamer(conf)
     else:
-        assert False, conf.model
+        model: Dreamer = WorldModelProbe(conf)  # type: ignore
     model.to(device)
-
     print(model)
     # print(repr(model))
     mlflow_log_text(repr(model), 'architecture.txt')
-
-    # Training
 
     optimizers = model.init_optimizers(conf.adam_lr, conf.adam_lr_actor, conf.adam_lr_critic, conf.adam_eps)
     resume_step = tools.mlflow_load_checkpoint(model, optimizers)
     if resume_step:
         info(f'Loaded model from checkpoint epoch {resume_step}')
+
+    # ---------------------
+    # TRAINING
+    # ---------------------
 
     start_time = time.time()
     steps = resume_step or 0
@@ -209,6 +147,11 @@ def run(conf):
             with timer('total'):
                 profiler.step()
                 steps += 1
+                will_log_batch = steps % conf.logbatch_interval == 1
+                will_image_pred = (
+                    will_log_batch or
+                    steps % conf.log_interval >= int(conf.log_interval * 0.9)  # 10% of batches
+                )
 
                 # Make batch
 
@@ -222,14 +165,15 @@ def run(conf):
                 with timer('forward'):
                     with autocast(enabled=conf.amp):
 
-                        state = states.get(wid) or model.init_state(conf.batch_size * conf.iwae_samples)
+                        state = states.get(wid)
+                        if state is None:
+                            state = model.init_state(conf.batch_size * conf.iwae_samples)
                         losses, new_state, loss_metrics, tensors, dream_tensors = \
-                            model.training_step(obs,
-                                                state,
-                                                iwae_samples=conf.iwae_samples,
-                                                imag_horizon=conf.imag_horizon,
-                                                do_image_pred=steps % conf.log_interval >= int(conf.log_interval * 0.9),  # 10% of batches
-                                                do_dream_tensors=steps % conf.logbatch_interval == 1)
+                            model.training_step(
+                                obs,
+                                state,
+                                do_image_pred=will_image_pred,
+                                do_dream_tensors=will_log_batch)
                         if conf.keep_state:
                             states[wid] = new_state
 
@@ -240,7 +184,7 @@ def run(conf):
                     for opt in optimizers:
                         opt.zero_grad()
                     for loss in losses:
-                        scaler.scale(loss).backward()
+                        scaler.scale(loss).backward()  # type: ignore
 
                 # Grad step
 
@@ -271,32 +215,34 @@ def run(conf):
 
                     # Log sample
 
-                    if steps % conf.logbatch_interval == 1:
+                    if will_log_batch:
                         log_batch_npz(batch, tensors, f'{steps:07}.npz', subdir='d2_wm_closed')
                     if dream_tensors:
                         log_batch_npz(batch, dream_tensors, f'{steps:07}.npz', subdir='d2_wm_dream')
 
                     # Log data buffer size
 
-                    if steps % conf.logbatch_interval == 0:
-                        repository = MlflowEpisodeRepository(input_dirs)
-                        data_train = DataSequential(repository, conf.batch_length, conf.batch_size, buffer_size=conf.buffer_size)
-                        metrics['data_steps'].append(data_train.stats_steps)
-                        metrics['data_env_steps'].append(data_train.stats_steps * conf.env_action_repeat)
+                    if online_data and steps % conf.logbatch_interval == 0:
+                        data_train_stats = DataSequential(MlflowEpisodeRepository(input_dirs), conf.batch_length, conf.batch_size)
+                        metrics['data_steps'].append(data_train_stats.stats_steps)
+                        metrics['data_env_steps'].append(data_train_stats.stats_steps * conf.env_action_repeat)
+                        if data_train_stats.stats_steps * conf.env_action_repeat >= conf.n_env_steps:
+                            info(f'Finished {conf.n_env_steps} env steps.')
+                            return
 
                     # Log metrics
 
                     if steps % conf.log_interval == 0:
-                        metrics = {f'train/{k}': np.mean(v) for k, v in metrics.items()}
-                        metrics.update({f'train/{k}_max': np.max(v) for k, v in metrics_max.items()})
-                        metrics['train/steps'] = steps  # type: ignore
-                        metrics['_step'] = steps  # type: ignore
-                        metrics['_loss'] = metrics['train/loss_model']
-                        metrics['_timestamp'] = datetime.now().timestamp()  # type: ignore
+                        metrics = {f'train/{k}': np.array(v).mean() for k, v in metrics.items()}
+                        metrics.update({f'train/{k}_max': np.array(v).max() for k, v in metrics_max.items()})
+                        metrics['train/steps'] = steps
+                        metrics['_step'] = steps
+                        metrics['_loss'] = metrics.get('train/loss_model', 0)
+                        metrics['_timestamp'] = datetime.now().timestamp()
 
                         t = time.time()
                         fps = (steps - last_steps) / (t - last_time)
-                        metrics['train/fps'] = fps  # type: ignore
+                        metrics['train/fps'] = fps
                         last_time, last_steps = t, steps
 
                         info(f"[{steps:06}]"
@@ -307,22 +253,9 @@ def run(conf):
                              f"  fps: {metrics['train/fps']:.3f}"
                              )
                         if steps > conf.log_interval:  # Skip the first batch, because the losses are very high and mess up y axis
-                            mlflow.log_metrics(metrics, step=steps)
+                            mlflow_log_metrics(metrics, step=steps)
                         metrics = defaultdict(list)
                         metrics_max = defaultdict(list)
-
-                        # Check subprocess
-
-                        subp_finished = []
-                        for p in subprocesses:
-                            if not p.is_alive():
-                                if p.exitcode == 0:
-                                    subp_finished.append(p)
-                                    info(f'Generator process {p.pid} finished')
-                                else:
-                                    raise Exception(f'Generator process {p.pid} died with exitcode {p.exitcode}')
-                        for p in subp_finished:
-                            subprocesses.remove(p)
 
                     # Save model
 
@@ -332,9 +265,9 @@ def run(conf):
 
                     # Stop
 
-                    if steps >= conf.n_steps or (online_data and len(subprocesses) == 0):
-                        info('Stopping')
-                        break
+                    if steps >= conf.n_steps:
+                        info(f'Finished {conf.n_steps} grad steps.')
+                        return
 
                 # Evaluate
 
@@ -342,16 +275,14 @@ def run(conf):
                     if conf.eval_interval and steps % conf.eval_interval == 0:
                         try:
                             # Test = same settings as train
-                            repository = MlflowEpisodeRepository(test_dirs)
-                            data_test = DataSequential(repository, conf.batch_length, conf.test_batch_size, skip_first=False, reset_interval=conf.reset_interval)
+                            data_test = DataSequential(MlflowEpisodeRepository(test_dirs), conf.batch_length, conf.test_batch_size, skip_first=False, reset_interval=conf.reset_interval)
                             test_iter = iter(DataLoader(preprocess(data_test), batch_size=None))
-                            evaluate('test', steps, model, test_iter, device, conf.test_batches, conf.iwae_samples, conf.keep_state, conf)
+                            evaluate('test', steps, model, test_iter, device, conf.test_batches, conf.iwae_samples, conf.keep_state, conf.test_save_size, conf)
 
                             # Eval = no state reset, multisampling
-                            repository = MlflowEpisodeRepository(eval_dirs)
-                            data_eval = DataSequential(repository, conf.batch_length, conf.eval_batch_size, skip_first=False)
+                            data_eval = DataSequential(MlflowEpisodeRepository(eval_dirs), conf.batch_length, conf.eval_batch_size, skip_first=False)
                             eval_iter = iter(DataLoader(preprocess(data_eval), batch_size=None))
-                            evaluate('eval', steps, model, eval_iter, device, conf.eval_batches, conf.eval_samples, True, conf)
+                            evaluate('eval', steps, model, eval_iter, device, conf.eval_batches, conf.eval_samples, True, conf.eval_save_size, conf)
 
                         except Exception as e:
                             # This catch is useful if there is no eval data generated yet
@@ -380,6 +311,7 @@ def evaluate(prefix: str,
              eval_batches: int,
              eval_samples: int,
              keep_state: bool,
+             save_size: int,
              conf):
 
     start_time = time.time()
@@ -459,18 +391,19 @@ def evaluate(prefix: str,
             # Log one episode batch
 
             if do_output_tensors:
-                npz_datas.append(prepare_batch_npz(dict(**batch, **tensors), take_b=1))
+                npz_datas.append(prepare_batch_npz(dict(**batch, **tensors), take_b=save_size))
             if n_finished_episodes[0] > 0:
                 # log predictions until first episode is finished
                 do_output_tensors = False
 
-    metrics_eval = {f'{prefix}/{k}': np.mean(v) for k, v in metrics_eval.items()}
-    mlflow.log_metrics(metrics_eval, step=steps)
+    metrics_eval = {f'{prefix}/{k}': np.array(v).mean() for k, v in metrics_eval.items()}
+    mlflow_log_metrics(metrics_eval, step=steps)
 
     if len(npz_datas) > 0:
         npz_data = {k: np.concatenate([d[k] for d in npz_datas], 1) for k in npz_datas[0]}
-        print_once(f'Saving batch d2_wm_closed_{prefix}: ', {k: tuple(v.shape) for k, v in npz_data.items()})  # type: ignore
-        tools.mlflow_log_npz(npz_data, f'{steps:07}.npz', subdir=f'd2_wm_closed_{prefix}', verbose=True)
+        print_once(f'Saving batch d2_wm_closed_{prefix}: ', {k: tuple(v.shape) for k, v in npz_data.items()})
+        r = npz_data['reward'][0].sum().item()
+        tools.mlflow_log_npz(npz_data, f'{steps:07}_r{r:.0f}.npz', subdir=f'd2_wm_closed_{prefix}', verbose=True)
 
     info(f'Evaluation ({prefix}): done in {(time.time()-start_time):.0f} sec, recorded {n_finished_episodes.sum()} episodes')
 
@@ -532,80 +465,12 @@ def prepare_batch_npz(data: Dict[str, Tensor], take_b=999):
     return {k: unpreprocess(k, v) for k, v in data.items()}
 
 
-def run_generator(env_id,
-                  conf,
-                  save_uri,
-                  save_uri2=None,
-                  policy='network',
-                  worker_id=0,
-                  num_steps=int(1e9),
-                  limit_step_ratio=0,
-                  block=False,
-                  split_fraction=0.0,
-                  metrics_prefix='agent',
-                  log_mlflow_metrics=True
-                  ):
-    # Make sure generator subprcess logs to the same mlflow run
-    os.environ['MLFLOW_RUN_ID'] = mlflow.active_run().info.run_id  # type: ignore
-    p = Process(target=generator.main,
-                daemon=True,
-                kwargs=dict(
-                    env_id=env_id,
-                    save_uri=save_uri,
-                    save_uri2=save_uri2,
-                    env_time_limit=conf.env_time_limit,
-                    env_action_repeat=conf.env_action_repeat,
-                    env_no_terminal=conf.env_no_terminal,
-                    limit_step_ratio=limit_step_ratio,
-                    policy=policy,
-                    num_steps=num_steps,
-                    worker_id=worker_id,
-                    model_conf=conf,
-                    log_mlflow_metrics=log_mlflow_metrics,
-                    split_fraction=split_fraction,
-                    metrics_prefix=metrics_prefix,
-                    metrics_gamma=conf.gamma,
-                ))
-    p.start()
-    if block:
-        p.join()
-    return p
-
-
 def get_profiler(conf):
     if conf.enable_profiler:
         return torch.profiler.profile(
-            # activities=[ProfilerActivity.CUDA],
+            activities=[ProfilerActivity.CUDA],
             schedule=torch.profiler.schedule(wait=10, warmup=10, active=1, repeat=3),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler('./log'),
+            on_trace_ready=tools.tensorboard_trace_handler('./log'),
         )
     else:
         return NoProfiler()
-
-
-if __name__ == '__main__':
-    configure_logging(prefix='[TRAIN]')
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--configs', nargs='+', required=True)
-    args, remaining = parser.parse_known_args()
-
-    # Config from YAML
-    conf = {}
-    configs = tools.read_yamls('./config')
-    for name in args.configs:
-        if ',' in name:
-            for n in name.split(','):
-                conf.update(configs[n])
-        else:
-            conf.update(configs[name])
-
-    # Override config from command-line
-    parser = argparse.ArgumentParser()
-    for key, value in conf.items():
-        type_ = type(value) if value is not None else str
-        if type_ == bool:
-            type_ = lambda x: bool(strtobool(x))
-        parser.add_argument(f'--{key}', type=type_, default=value)
-    conf = parser.parse_args(remaining)
-
-    run(conf)

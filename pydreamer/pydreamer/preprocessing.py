@@ -3,6 +3,7 @@ from typing import Callable, Dict, Tuple
 import numpy as np
 from torch.utils.data import IterableDataset, get_worker_info
 
+from .models.functions import clip_rewards_np
 from .tools import *
 
 
@@ -20,7 +21,7 @@ def img_to_onehot(x: np.ndarray, n_categories) -> np.ndarray:
 def to_image(x: np.ndarray) -> np.ndarray:
     if x.dtype == np.uint8:
         x = x.astype(np.float32)
-        x = x / 255.0 - 0.5  # type: ignore
+        x = x / 255.0 - 0.5
     else:
         assert 0.0 <= x[0, 0, 0, 0, 0] and x[0, 0, 0, 0, 0] <= 1.0
         x = x.astype(np.float32)
@@ -69,10 +70,10 @@ class TransformedDataset(IterableDataset):
 class Preprocessor:
 
     def __init__(self,
-                 image_key='image', 
-                 map_key=None, 
-                 image_categorical=None, 
-                 map_categorical=None, 
+                 image_key='image',
+                 map_key=None,
+                 image_categorical=None,
+                 map_categorical=None,
                  action_dim=0,
                  clip_rewards=None,
                  amp=False):
@@ -122,11 +123,11 @@ class Preprocessor:
 
         if 'map_seen' in batch:
             # map_seen contains 0 where map is unseen, otherwise =map
-            batch['map_seen_mask'] = (batch['map_seen'] > 0).astype(int)  # type: ignore
+            batch['map_seen_mask'] = (batch['map_seen'] > 0).astype(int)
             del batch['map_seen']
         elif 'map_vis' in batch:
             # map_vis shows how long ago cell was seen, if never, then equals to max_steps=500
-            batch['map_seen_mask'] = (batch['map_vis'] < 500).astype(int)  # type: ignore
+            batch['map_seen_mask'] = (batch['map_vis'] < 500).astype(int)
             del batch['map_vis']
 
         # action
@@ -135,15 +136,18 @@ class Preprocessor:
             batch['action'] = to_onehot(batch['action'], self.action_dim)
         assert len(batch['action'].shape) == 3
         batch['action'] = batch['action'].astype(np.float32)
+        
+        if 'action_next' in batch:
+            if len(batch['action_next'].shape) == 2:
+                batch['action_next'] = to_onehot(batch['action_next'], self.action_dim)
+            assert len(batch['action_next'].shape) == 3
+            batch['action_next'] = batch['action_next'].astype(np.float32)
 
         # reward, terminal
 
         batch['terminal'] = batch.get('terminal', np.zeros((T, B))).astype(np.float32)
         batch['reward'] = batch.get('reward', np.zeros((T, B))).astype(np.float32)
-        if self.clip_rewards == 'tanh':
-            batch['reward'] = np.tanh(batch['reward'])  # type: ignore
-        if self.clip_rewards == 'log1p':
-            batch['reward'] = np.log1p(batch['reward'])  # type: ignore
+        batch['reward'] = clip_rewards_np(batch['reward'], self.clip_rewards)
 
         # map_coord
 
@@ -151,14 +155,18 @@ class Preprocessor:
             map_size = float(batch['map'].shape[-2])
             agent_pos = batch['agent_pos'] / map_size * 2 - 1.0
             agent_dir = batch['agent_dir']
-            batch['map_coord'] = np.concatenate([agent_pos, agent_dir], axis=-1).astype(np.float32)  # type: ignore
+            batch['map_coord'] = np.concatenate([agent_pos, agent_dir], axis=-1).astype(np.float32)
 
         # vecobs
 
         if 'vecobs' in batch:
             batch['vecobs'] = batch['vecobs'].astype(np.float32)
-        else:
-            batch['vecobs'] = np.zeros((T, B, 64), np.float32)
+        elif 'inventory' in batch and 'equipped' in batch:
+            # inventory, equipped (MineRL) # TODO: customized encoder/decoder
+            batch['vecobs'] = np.concatenate([
+                batch['inventory'].astype(np.float32),
+                batch['equipped'].astype(np.float32)
+            ], axis=-1)
 
         # probe goal_direction
 
@@ -172,7 +180,7 @@ class Preprocessor:
         # => float16
 
         if self.amp:
-            for key in ['image', 'action', 'map', 'map_coord', 'vecobs']:
+            for key in ['image', 'action', 'action_next', 'map', 'map_coord', 'vecobs']:
                 if key in batch:
                     batch[key] = batch[key].astype(np.float16)
 

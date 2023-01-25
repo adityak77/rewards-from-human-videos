@@ -28,12 +28,14 @@ def main(env_id='MiniGrid-MazeS11N-v0',
          save_uri=None,
          save_uri2=None,
          worker_id=0,
-         policy='random',
+         policy_main='random',
+         policy_prefill='random',
          num_steps=int(1e6),
+         num_steps_prefill=0,
          env_no_terminal=False,
          env_time_limit=0,
          env_action_repeat=1,
-         limit_step_ratio=0,
+         limit_step_ratio=0.0,
          steps_per_npz=1000,
          model_reload_interval=120,
          model_conf=dict(),
@@ -45,64 +47,40 @@ def main(env_id='MiniGrid-MazeS11N-v0',
          ):
 
     configure_logging(prefix=f'[GEN {worker_id}]', info_color=LogColorFormatter.GREEN)
-
-    # Mlflow
-
-    if 'MLFLOW_RUN_ID' in os.environ:
-        run = mlflow.active_run()
-        if run is None:
-            run = mlflow.start_run(run_id=os.environ['MLFLOW_RUN_ID'])
-    else:
-        mlflow.start_run(run_name=f'{env_id}-{worker_id}')
-
-    info(f'Generator {worker_id} started: env={env_id}, n_steps={num_steps}, split_fraction={split_fraction}, metrics={metrics_prefix if log_mlflow_metrics else None}, save_uri={save_uri}')
+    mlrun = mlflow_init()
+    info(f'Generator {worker_id} started:'
+         f' env={env_id}'
+         f', n_steps={num_steps:,}'
+         f', n_prefill={num_steps_prefill:,}'
+         f', split_fraction={split_fraction}'
+         f', metrics={metrics_prefix if log_mlflow_metrics else None}'
+         f', save_uri={save_uri}')
 
     if not save_uri:
-        save_uri = f'{mlflow.active_run().info.artifact_uri}/episodes/{worker_id}'  # type: ignore
+        save_uri = f'{mlrun.info.artifact_uri}/episodes/{worker_id}'
     if not save_uri2:
         assert split_fraction == 0.0, 'Specify two save destinations, if splitting'
 
     repository = MlflowEpisodeRepository(save_uri)
     repository2 = MlflowEpisodeRepository(save_uri2) if save_uri2 else repository
-    nfiles, steps, episodes = repository.count_steps()
-    info(f'Found existing {nfiles} files, {episodes} episodes, {steps} steps in {repository}')
+    nfiles, steps_saved, episodes = repository.count_steps()
+    info(f'Found existing {nfiles} files, {episodes} episodes, {steps_saved} steps in {repository}')
 
     # Env
 
-    env = create_env(env_id, env_no_terminal, env_time_limit, env_action_repeat)
+    env = create_env(env_id, env_no_terminal, env_time_limit, env_action_repeat, worker_id)
 
     # Policy
 
-    model = None
-    if policy == 'network':
-        conf = model_conf
-        if conf.model == 'dreamer':
-            model = Dreamer(conf)
-        else:
-            assert False, conf.model
-        preprocess = Preprocessor(image_categorical=conf.image_channels if conf.image_categorical else None,
-                                  image_key=conf.image_key,
-                                  map_categorical=conf.map_channels if conf.map_categorical else None,
-                                  map_key=conf.map_key,
-                                  action_dim=env.action_size,  # type: ignore
-                                  clip_rewards=conf.clip_rewards)
-        policy = NetworkPolicy(model, preprocess)
-
-    elif policy == 'random':
-        policy = RandomPolicy(env.action_space)
-    elif policy == 'minigrid_wander':
-        from pydreamer.envs.minigrid import MinigridWanderPolicy
-        policy = MinigridWanderPolicy()
-    elif policy == 'maze_bouncing_ball':
-        from pydreamer.envs.miniworld import MazeBouncingBallPolicy
-        policy = MazeBouncingBallPolicy()
-    elif policy == 'maze_dijkstra':
-        from pydreamer.envs.miniworld import MazeDijkstraPolicy
-        step_size = env.params.params['forward_step'].default / env.room_size  # type: ignore
-        turn_size = env.params.params['turn_step'].default  # type: ignore
-        policy = MazeDijkstraPolicy(step_size, turn_size)
+    if num_steps_prefill:
+        # Start with prefill policy
+        info(f'Prefill policy: {policy_prefill}')
+        policy = create_policy(policy_prefill, env, model_conf)
+        is_prefill_policy = True
     else:
-        assert False, 'Unknown policy'
+        info(f'Policy: {policy_main}')
+        policy = create_policy(policy_main, env, model_conf)
+        is_prefill_policy = False
 
     # RUN
 
@@ -111,10 +89,20 @@ def main(env_id='MiniGrid-MazeS11N-v0',
     model_step = 0
     metrics_agg = defaultdict(list)
     all_returns = []
+    steps = 0
 
-    while steps < num_steps:
+    while steps_saved < num_steps:
 
-        if model is not None:
+        # Switch policy prefill => main
+
+        if is_prefill_policy and steps_saved >= num_steps_prefill:
+            info(f'Switching to main policy: {policy_main}')
+            policy = create_policy(policy_main, env, model_conf)
+            is_prefill_policy = False
+
+        # Load network
+
+        if isinstance(policy, NetworkPolicy):
             if time.time() - last_model_load > model_reload_interval:
                 while True:
                     # takes ~10sec to load checkpoint
@@ -127,7 +115,7 @@ def main(env_id='MiniGrid-MazeS11N-v0',
                         debug('Generator model checkpoint not found, waiting...')
                         time.sleep(10)
 
-            if limit_step_ratio and steps >= model_step * limit_step_ratio:
+            if limit_step_ratio and steps_saved >= model_step * limit_step_ratio:
                 # Rate limiting - keep looping until new model checkpoint is loaded
                 time.sleep(1)
                 continue
@@ -167,28 +155,31 @@ def main(env_id='MiniGrid-MazeS11N-v0',
 
         info(f"Episode recorded:"
              f"  steps: {epsteps}"
-             f",  reward: {data['reward'].sum()}"
-             f",  terminal: {data['terminal'].sum()}"
-             f",  visited: {(data.get('map_seen', np.zeros(1))[-1] > 0).mean():.1%}"
+             f",  reward: {data['reward'].sum():.1f}"
+             f",  terminal: {data['terminal'].sum():.0f}"
+            #  f",  visited: {(data.get('map_seen', np.zeros(1))[-1] > 0).mean():.1%}"
              f",  total steps: {steps:.0f}"
              f",  episodes: {episodes}"
+             f",  saved steps (train): {steps_saved:.0f}"
              f",  fps: {fps:.0f}"
              )
 
         if log_mlflow_metrics:
-            metrics = {f'{metrics_prefix}/{k}': np.mean(v) for k, v in metrics.items()}
+            metrics = {f'{metrics_prefix}/{k}': np.array(v).mean() for k, v in metrics.items()}
             all_returns.append(data['reward'].sum())
             metrics.update({
                 f'{metrics_prefix}/episode_length': epsteps,
                 f'{metrics_prefix}/fps': fps,
-                f'{metrics_prefix}/steps': steps,
+                f'{metrics_prefix}/steps': steps,  # All steps since previous restart
+                f'{metrics_prefix}/steps_saved': steps_saved,  # Steps saved in the training repo
                 f'{metrics_prefix}/env_steps': steps * env_action_repeat,
                 f'{metrics_prefix}/episodes': episodes,
                 f'{metrics_prefix}/return': data['reward'].sum(),
-                f'{metrics_prefix}/return_cum': np.mean(all_returns[-100:]),
-            })  # type: ignore
+                f'{metrics_prefix}/return_cum': np.array(all_returns[-100:]).mean(),
+            })
 
             # Calculate return_discounted
+
             rewards_v = data['reward'].copy()
             if not data['terminal'][-1]:
                 avg_value = rewards_v.mean() / (1.0 - metrics_gamma)
@@ -197,9 +188,18 @@ def main(env_id='MiniGrid-MazeS11N-v0',
             metrics[f'{metrics_prefix}/return_discounted'] = returns_discounted.mean()
 
             # Calculate policy_value_terminal
+
             if data['terminal'][-1]:
                 value_terminal = data['policy_value'][-2] - data['reward'][-1]  # This should be zero, because value[last] = reward[last]
                 metrics[f'{metrics_prefix}/policy_value_terminal'] = value_terminal
+
+            # Goal visibility metrics for Scavenger
+
+            if 'goals_visage' in data:
+                goals_seen = data['goals_visage'] < 1e5
+                metrics[f'{metrics_prefix}/goals_seen_avg'] = goals_seen.sum(axis=-1).mean()
+                metrics[f'{metrics_prefix}/goals_seen_last'] = goals_seen[-1].sum()
+                metrics[f'{metrics_prefix}/goals_seenage'] = (data['goals_visage'] * goals_seen).sum() / goals_seen.sum()
 
             # Aggregate every 10 episodes
 
@@ -208,11 +208,11 @@ def main(env_id='MiniGrid-MazeS11N-v0',
                     metrics_agg[k].append(v)
 
             if len(metrics_agg[f'{metrics_prefix}/return']) >= log_every:
-                metrics_agg_max = {k: np.max(v) for k, v in metrics_agg.items()}
-                metrics_agg = {k: np.mean(v) for k, v in metrics_agg.items()}
+                metrics_agg_max = {k: np.array(v).max() for k, v in metrics_agg.items()}
+                metrics_agg = {k: np.array(v).mean() for k, v in metrics_agg.items()}
                 metrics_agg[f'{metrics_prefix}/return_max'] = metrics_agg_max[f'{metrics_prefix}/return']
                 metrics_agg['_timestamp'] = datetime.now().timestamp()
-                mlflow.log_metrics(metrics_agg, step=model_step if model else 0)
+                mlflow_log_metrics(metrics_agg, step=model_step)
                 metrics_agg = defaultdict(list)
 
         # Save to npz
@@ -252,7 +252,52 @@ def main(env_id='MiniGrid-MazeS11N-v0',
                     pass
                 repo.save_data(data, episodes - datas_episodes, episodes - 1, i)
 
+            if repo == repository:
+                # Only count steps in the training repo, so that prefill and limit_step_ratio works correctly
+                steps_saved += datas_steps
+
     info('Generator done.')
+
+
+def create_policy(policy_type: str, env, model_conf):
+    if policy_type == 'network':
+        conf = model_conf
+        if conf.model == 'dreamer':
+            model = Dreamer(conf)
+        else:
+            assert False, conf.model
+        preprocess = Preprocessor(image_categorical=conf.image_channels if conf.image_categorical else None,
+                                  image_key=conf.image_key,
+                                  map_categorical=conf.map_channels if conf.map_categorical else None,
+                                  map_key=conf.map_key,
+                                  action_dim=env.action_size,  # type: ignore
+                                  clip_rewards=conf.clip_rewards)
+        return NetworkPolicy(model, preprocess)
+
+    if policy_type == 'random':
+        return RandomPolicy(env.action_space)
+
+    if policy_type == 'minigrid_wander':
+        from pydreamer.envs.minigrid import MinigridWanderPolicy
+        return MinigridWanderPolicy()
+
+    if policy_type == 'maze_bouncing_ball':
+        from pydreamer.envs.miniworld import MazeBouncingBallPolicy
+        return MazeBouncingBallPolicy()
+
+    if policy_type == 'maze_dijkstra':
+        from pydreamer.envs.miniworld import MazeDijkstraPolicy
+        step_size = env.params.params['forward_step'].default / env.room_size  # type: ignore
+        turn_size = env.params.params['turn_step'].default  # type: ignore
+        return MazeDijkstraPolicy(step_size, turn_size)
+
+    if policy_type == 'goal_dijkstra':
+        from pydreamer.envs.miniworld import MazeDijkstraPolicy
+        step_size = env.params.params['forward_step'].default / env.room_size  # type: ignore
+        turn_size = env.params.params['turn_step'].default  # type: ignore
+        return MazeDijkstraPolicy(step_size, turn_size, goal_strategy='goal_direction', random_prob=0)
+
+    raise ValueError(policy_type)
 
 
 class RandomPolicy:
@@ -274,7 +319,7 @@ class NetworkPolicy:
         obs_model: Dict[str, Tensor] = map_structure(batch, torch.from_numpy)  # type: ignore
 
         with torch.no_grad():
-            action_distr, new_state, metrics = self.model.forward(obs_model, self.state)
+            action_distr, new_state, metrics = self.model.inference(obs_model, self.state)
             action = action_distr.sample()
             self.state = new_state
 
@@ -289,11 +334,12 @@ class NetworkPolicy:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_id', type=str, required=True)
-    parser.add_argument('--policy', type=str, required=True)
+    parser.add_argument('--policy_main', type=str, required=True)
     parser.add_argument('--save_uri', type=str, default='')
     parser.add_argument('--num_steps', type=int, default=1_000_000)
     parser.add_argument('--worker_id', type=int, default=0)
     parser.add_argument('--env_time_limit', type=int, default=0)
     parser.add_argument('--env_action_repeat', type=int, default=1)
+    parser.add_argument('--steps_per_npz', type=int, default=1000)
     args = parser.parse_args()
     main(**vars(args))

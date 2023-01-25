@@ -6,9 +6,9 @@ import sys
 import tempfile
 import time
 import warnings
-from logging import debug, info
+from logging import debug, info, exception
 from pathlib import Path
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import yaml
@@ -37,7 +37,7 @@ def to_list(s):
 def read_yamls(dir):
     conf = {}
     no_conf = True
-    for config_file in Path(dir).glob('*.yaml'):
+    for config_file in Path(dir).glob('**/*.yaml'):
         no_conf = False
         with config_file.open('r') as f:
             conf.update(yaml.safe_load(f))
@@ -46,18 +46,80 @@ def read_yamls(dir):
     return conf
 
 
-def mlflow_start_or_resume(run_name, resume_id=None):
+def mlflow_init(wait_for_resume=False):
     import mlflow
-    run_id = None
-    info(f'Starting or resuming mlflow run ({os.environ.get("MLFLOW_TRACKING_URI", "local")}) ...')
-    if resume_id:
-        runs = mlflow.search_runs(filter_string=f'tags.resume_id="{resume_id}"')
-        if len(runs) > 0:
-            run_id = runs.run_id.iloc[0]
-            info(f'Resumed mlflow run {run_id} ({resume_id})')
-    run = mlflow.start_run(run_name=run_name, run_id=run_id, tags={'resume_id': resume_id or ''})
-    info(f'Started mlflow run {run.info.run_id} in experiment {run.info.experiment_id}')
+    run_name = os.environ.get('MLFLOW_RUN_NAME')
+    resume_id = os.environ.get('MLFLOW_RESUME_ID')
+    uri = os.environ.get('MLFLOW_TRACKING_URI', 'local')
+
+    run = mlflow.active_run()
+    if run:
+        # Run already active
+        pass
+
+    elif os.environ.get('MLFLOW_RUN_ID'):
+        # Run not active, but specific ID set (probably subprocess)
+        run = mlflow.start_run(run_id=os.environ['MLFLOW_RUN_ID'])
+        info(f'Reinitialized mlflow run {run.info.run_id} ({resume_id}) in {uri}/{run.info.experiment_id}')
+
+    else:
+        resume_run_id = None
+        if resume_id:
+            # Resume ID specified - try to find the same run
+            while True:
+                runs = mlflow.search_runs(filter_string=f'tags.resume_id="{resume_id}"')
+                if len(runs) > 0:
+                    resume_run_id = runs.run_id.iloc[0]  # type: ignore
+                    break
+                else:
+                    if wait_for_resume:
+                        debug(f'Waiting until mlflow run ({resume_id}) is available...')
+                        time.sleep(10)
+                    else:
+                        break
+        else:
+            assert not wait_for_resume, "Wait for resume, but no MLFLOW_RESUME_ID"
+
+        if resume_run_id:
+            # Resuming run
+            run = mlflow.start_run(run_id=resume_run_id)
+            info(f'Resumed mlflow run {run.info.run_id} ({resume_id}) in {uri}/{run.info.experiment_id}')
+        else:
+            # Starting new run
+            run = mlflow.start_run(run_name=run_name, tags={'resume_id': resume_id or ''})
+            info(f'Started mlflow run {run.info.run_id} ({resume_id}) in {uri}/{run.info.experiment_id}')
+
+    os.environ['MLFLOW_RUN_ID'] = run.info.run_id  # for subprocesses
     return run
+
+
+def mlflow_log_params(params: dict):
+    import mlflow
+    MAX_VALUE_LENGTH = 250
+    MAX_BATCH_SIZE = 100
+    kvs = [
+        (str(k), str(v))
+        for k, v in params.items()
+        if 1 <= len(str(v)) <= MAX_VALUE_LENGTH  # Filter out too long values. Also filter out empty strings, for some reason causes INVALID_PARAMETER_VALUE
+    ]
+    for i in range(0, len(kvs), MAX_BATCH_SIZE):  # log_params() allows max 100 items
+        try:
+            params_batch = dict(kvs[i:i + MAX_BATCH_SIZE])
+            mlflow.log_params(params_batch)
+        except Exception as e:
+            # This happens when resuming and config has different parameters - it's fine
+            exception('Error in mlflow.log_params (it is ok if params changed).')
+
+
+def mlflow_log_metrics(metrics: dict, step: int):
+    import mlflow
+    while True:
+        try:
+            mlflow.log_metrics(metrics, step=step)
+            break
+        except:
+            exception('Error logging metrics - will retry.')
+            time.sleep(10)
 
 
 def mlflow_log_npz(data: dict, name, subdir=None, verbose=False, repository: ArtifactRepository = None):
@@ -124,7 +186,11 @@ def mlflow_load_checkpoint(model, optimizers=tuple(), artifact_path='checkpoints
         except Exception as e:  # TODO: check if it's an error instead of expected "not found"
             # Checkpoint not found
             return None
-        checkpoint = torch.load(path, map_location=map_location)
+        try:
+            checkpoint = torch.load(path, map_location=map_location)
+        except:
+            exception('Error reading checkpoint')
+            return None
         model.load_state_dict(checkpoint['model_state_dict'])
         for i, opt in enumerate(optimizers):
             opt.load_state_dict(checkpoint[f'optimizer_{i}_state_dict'])
@@ -145,7 +211,7 @@ def load_npz(path, keys=None) -> Dict[str, np.ndarray]:
     if isinstance(path, str):
         path = Path(path)
     with path.open('rb') as f:
-        fdata: Dict[str, np.ndarray] = np.load(f)  # type: ignore
+        fdata: Dict[str, np.ndarray] = np.load(f)
         if keys is None:
             data = {key: fdata[key] for key in fdata}
         else:
@@ -201,12 +267,14 @@ class NoProfiler:
 
 
 def chunk_episode_data(data: Dict[str, np.ndarray], min_length: int):
-    n = len(data['reward'])
+    # this n=len(..)-1 and i_to=(...)+1 makes first reset step "free" and correctly chunks 2000 episode into (1001)+(1000)
+    n = len(data['reward']) - 1
     chunks = n // min_length
+    i_from = 0
     for i_chunk in range(chunks):
-        i_from = n * i_chunk // chunks
-        i_to = n * (i_chunk + 1) // chunks
+        i_to = n * (i_chunk + 1) // chunks + 1
         data_chunk = {key: data[key][i_from:i_to] for key in data}
+        i_from = i_to
         yield data_chunk
 
 
@@ -261,7 +329,41 @@ def configure_logging(prefix='[%(name)s]', level=logging.DEBUG, info_color=None)
     ))
     logging.root.setLevel(level)
     logging.root.handlers = [handler]
-    for logname in ['urllib3', 'requests', 'mlflow', 'git', 'azure', 'PIL', 'numba']:
+    for logname in ['urllib3', 'requests', 'mlflow', 'git', 'azure', 'PIL', 'numba', 'google.auth']:
         logging.getLogger(logname).setLevel(logging.WARNING)  # disable other loggers
-    for logname in ['absl']:
+    for logname in ['absl', 'minerl']:
         logging.getLogger(logname).setLevel(logging.INFO)
+
+
+def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
+    """Forked from: torch.profiler.profiler.tensorboard_trace_handler.
+
+    Outputs tracing files to directory of ``dir_name``, then that directory can be
+    directly delivered to tensorboard as logdir.
+    ``worker_name`` should be unique for each worker in distributed scenario,
+    it will be set to '[hostname]_[pid]' by default.
+    """
+    import os
+    import socket
+    import time
+    import mlflow
+
+    def handler_fn(prof) -> None:
+        nonlocal worker_name
+        if not os.path.isdir(dir_name):
+            try:
+                os.makedirs(dir_name, exist_ok=True)
+            except Exception:
+                raise RuntimeError("Can't create directory: " + dir_name)
+        if not worker_name:
+            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
+        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+        if use_gzip:
+            file_name = file_name + '.gz'
+        path = os.path.join(dir_name, file_name)
+        prof.export_chrome_trace(path)
+        # PATCH: upload to mlflow
+        debug(f'Uploading artifact {path} size {Path(path).stat().st_size/1024/1024:.2f} MB')
+        mlflow.log_artifact(path, artifact_path='profiling')
+
+    return handler_fn

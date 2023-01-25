@@ -6,7 +6,8 @@ if [[ $# -eq 0 ]] ; then
 fi
 EXPERIMENT="$1"
 CONFIG="${2:-atari}"
-RESUMEID="$3"
+DOCKERFILE="${3:-Dockerfile}"
+RESUMEID="$4"
 
 if [ ! -f ".env" ]; then
     echo ".env file not found - need it to set DOCKER_REPO, MLFLOW_TRACKING_URI"
@@ -20,17 +21,21 @@ fi
 echo "Loaded variables from .env: DOCKER_REPO=$DOCKER_REPO, MLFLOW_TRACKING_URI=$MLFLOW_TRACKING_URI"
 
 TAG=$(git rev-parse --short HEAD)
-docker build . -f Dockerfile -t $DOCKER_REPO:$TAG
+docker build . -f $DOCKERFILE -t $DOCKER_REPO:$TAG
 docker push $DOCKER_REPO:$TAG
 
-RND=$(base64 < /dev/urandom | tr -d '[A-Z/+]' | head -c 6)
+RND=$(base64 < /dev/urandom | tr -d 'A-Z/+' | head -c 6)
 RESUMEID="${RESUMEID:-$RND}"
+
+if [[ -n "$K8S_CONTEXT" ]]; then
+    kubectl config use-context $K8S_CONTEXT
+fi
 
 cat <<EOF | kubectl apply -f -
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pydreamer-${EXPERIMENT//_/}-$RESUMEID-$RND
+  name: pydreamer-${EXPERIMENT//_/}-$RND
   namespace: default
 spec:
   backoffLimit: 3
@@ -56,29 +61,26 @@ spec:
               value: ${MLFLOW_TRACKING_PASSWORD}
             - name: AZURE_STORAGE_ACCESS_KEY
               value: ${AZURE_STORAGE_ACCESS_KEY}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: .gcs_credentials
+            - name: MLFLOW_RUN_NAME
+              value: ${EXPERIMENT}
+            - name: MLFLOW_RESUME_ID
+              value: ${RESUMEID}
           volumeMounts:
             - name: dshm
               mountPath: /dev/shm
-          command:
-            - sh
           args:
-            - scripts/xvfb_run.sh 
-            - python3
-            - train.py
             - --configs
             - defaults
             - $CONFIG
             - $EXPERIMENT
-            - --run_name
-            - $EXPERIMENT
-            - --resume_id
-            - $RESUMEID
           resources:
             limits:
               nvidia.com/gpu: 1
             requests:
               memory: 8000Mi
-              cpu: 4000m
+              cpu: 8000m
               nvidia.com/gpu: 1
           securityContext:
             capabilities:

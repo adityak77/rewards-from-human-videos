@@ -128,7 +128,17 @@ class MlflowEpisodeRepository(EpisodeRepository):
 class DataSequential(IterableDataset):
     """Dataset which processes episodes sequentially"""
 
-    def __init__(self, repository: EpisodeRepository, batch_length, batch_size, skip_first=True, reload_interval=0, buffer_size=0, reset_interval=0):
+    def __init__(self,
+                 repository: EpisodeRepository, 
+                 batch_length, 
+                 batch_size, 
+                 skip_first=True, 
+                 reload_interval=0, 
+                 buffer_size=0, 
+                 reset_interval=0,
+                 allow_mid_reset=False,
+                 check_nonempty=True,
+                 ):
         super().__init__()
         self.repository = repository
         self.batch_length = batch_length
@@ -137,8 +147,10 @@ class DataSequential(IterableDataset):
         self.reload_interval = reload_interval
         self.buffer_size = buffer_size
         self.reset_interval = reset_interval
+        self.allow_mid_reset = allow_mid_reset
         self.reload_files(True)
-        assert len(self.files) > 0, 'No data found'
+        if check_nonempty:
+            assert len(self.files) > 0, 'No data found'
 
     def reload_files(self, is_first=False):
         verbose = get_worker_id() == 0
@@ -146,7 +158,7 @@ class DataSequential(IterableDataset):
             debug(f'Reading files from {self.repository}...')
 
         files_all = self.repository.list_files()
-        files_all.sort(key=lambda e: -e.episode_to)
+        files_all.sort(key=lambda e: -e.episode_to)  # TODO: prefill should be sorted first. can we use timestamp?
 
         files = []
         steps_total = 0
@@ -194,7 +206,7 @@ class DataSequential(IterableDataset):
             if last_partial_batch is not None:
                 for batch, partial in it:
                     assert not partial, 'First batch must be full. Is episode_length < batch_size?'
-                    batch = cat_structure_np([last_partial_batch, batch])  # type: ignore
+                    batch = cat_structure_np([last_partial_batch, batch])
                     assert lenb(batch) == self.batch_length
                     last_partial_batch = None
                     yield batch
@@ -202,7 +214,11 @@ class DataSequential(IterableDataset):
 
             for batch, partial in it:
                 if partial:
-                    last_partial_batch = batch
+                    if self.allow_mid_reset:
+                        last_partial_batch = batch
+                    else:
+                        # If no mid-reset, just ignore the partial batch, and next batch will be from beginning
+                        last_partial_batch = None
                     break  # partial will always be last
                 yield batch
 
@@ -226,9 +242,8 @@ class DataSequential(IterableDataset):
             assert False, 'Legacy, shouldnt happen anymore'  # TODO: remove
             # data['map_centered'] = (data['map_centered'] * 255).clip(0, 255).astype(np.uint8)
 
-        # # Convert one-hot back to categorical
-        # if len(data['action'].shape) == 2:
-        #     data['action'] = data['action'].argmax(-1)
+        # Add action_next (action[i] -> obs[i] -> action_next[i] -> obs[i+1])
+        data['action_next'] = np.concatenate([data['action'][1:], np.zeros_like(data['action'][:1])])  # last one is zero
 
         n = lenb(data)
         if n < batch_length:
@@ -263,14 +278,14 @@ class DataSequential(IterableDataset):
         while True:
             if self.should_reload_files():
                 self.reload_files()
-            f = np.random.choice(self.files)
+            f = np.random.choice(self.files)  # type: ignore
             yield f
 
     def randomize_resets(self, resets, reset_interval, batch_length):
         assert resets[0]
         ep_boundaries = np.where(resets)[0].tolist() + [len(resets)]
 
-        random_resets: np.ndarray = np.zeros_like(resets)  # type: ignore
+        random_resets = np.zeros_like(resets)
         for i in range(len(ep_boundaries) - 1):
             ep_start = ep_boundaries[i]
             ep_end = ep_boundaries[i + 1]

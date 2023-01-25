@@ -21,7 +21,9 @@ class Dreamer(nn.Module):
     def __init__(self, conf):
         super().__init__()
         assert conf.action_dim > 0, "Need to set action_dim to match environment"
-        state_dim = conf.deter_dim + conf.stoch_dim * (conf.stoch_discrete or 1)
+        features_dim = conf.deter_dim + conf.stoch_dim * (conf.stoch_discrete or 1)
+        self.iwae_samples = conf.iwae_samples
+        self.imag_horizon = conf.imag_horizon
 
         # World model
 
@@ -29,7 +31,7 @@ class Dreamer(nn.Module):
 
         # Actor critic
 
-        self.ac = ActorCritic(in_dim=state_dim,
+        self.ac = ActorCritic(in_dim=features_dim,
                               out_actions=conf.action_dim,
                               layer_norm=conf.layer_norm,
                               gamma=conf.gamma,
@@ -43,7 +45,7 @@ class Dreamer(nn.Module):
         # Map probe
 
         if conf.probe_model == 'map':
-            probe_model = MapProbeHead(state_dim + 4, conf)
+            probe_model = MapProbeHead(features_dim + 4, conf)
         elif conf.probe_model == 'goals':
             probe_model = GoalsProbe(features_dim, conf)
         elif conf.probe_model == 'map+goals':
@@ -87,10 +89,10 @@ class Dreamer(nn.Module):
     def init_state(self, batch_size: int):
         return self.wm.init_state(batch_size)
 
-    def forward(self,
-                obs: Dict[str, Tensor],
-                in_state: Any,
-                ) -> Tuple[D.Distribution, Any, Dict]:
+    def inference(self,
+                  obs: Dict[str, Tensor],
+                  in_state: Any,
+                  ) -> Tuple[D.Distribution, Any, Dict]:
         assert 'action' in obs, 'Observation should contain previous action'
         act_shape = obs['action'].shape
         assert len(act_shape) == 3 and act_shape[0] == 1, f'Expected shape (1,B,A), got {act_shape}'
@@ -111,8 +113,8 @@ class Dreamer(nn.Module):
     def training_step(self,
                       obs: Dict[str, Tensor],
                       in_state: Any,
-                      iwae_samples: int = 1,
-                      imag_horizon: int = 1,
+                      iwae_samples: Optional[int] = None,
+                      imag_horizon: Optional[int] = None,
                       do_open_loop=False,
                       do_image_pred=False,
                       do_dream_tensors=False,
@@ -121,6 +123,8 @@ class Dreamer(nn.Module):
         assert 'reward' in obs, '`reward` required in observation'
         assert 'reset' in obs, '`reset` required in observation'
         assert 'terminal' in obs, '`terminal` required in observation'
+        iwae_samples = int(iwae_samples or self.iwae_samples)
+        imag_horizon = int(imag_horizon or self.imag_horizon)
         T, B = obs['action'].shape[:2]
         I, H = iwae_samples, imag_horizon
 
@@ -147,7 +151,10 @@ class Dreamer(nn.Module):
         features_dream, actions_dream, rewards_dream, terminals_dream = \
             self.dream(in_state_dream, H, self.ac.actor_grad == 'dynamics')  # (H+1,TBI,D)
         (loss_actor, loss_critic), metrics_ac, tensors_ac = \
-            self.ac.training_step(features_dream, actions_dream, rewards_dream, terminals_dream)
+            self.ac.training_step(features_dream.detach(),
+                                  actions_dream.detach(),
+                                  rewards_dream.mean.detach(),
+                                  terminals_dream.mean.detach())
         metrics.update(**metrics_ac)
         tensors.update(policy_value=unflatten_batch(tensors_ac['value'][0], (T, B, I)).mean(-1))
 
@@ -162,7 +169,7 @@ class Dreamer(nn.Module):
                 in_state_dream: StateB = map_structure(states, lambda x: x.detach()[0, :, 0])  # type: ignore  # (T,B,I) => (B)
                 features_dream, actions_dream, rewards_dream, terminals_dream = self.dream(in_state_dream, T - 1)  # H = T-1
                 image_dream = self.wm.decoder.image.forward(features_dream)
-                _, _, tensors_ac = self.ac.training_step(features_dream, actions_dream, rewards_dream, terminals_dream, log_only=True)
+                _, _, tensors_ac = self.ac.training_step(features_dream, actions_dream, rewards_dream.mean, terminals_dream.mean, log_only=True)
                 # The tensors are intentionally named same as in tensors, so the logged npz looks the same for dreamed or not
                 dream_tensors = dict(action_pred=torch.cat([obs['action'][:1], actions_dream]),  # first action is real from previous step
                                      reward_pred=rewards_dream.mean,
@@ -232,6 +239,7 @@ class WorldModel(nn.Module):
         self.stoch_discrete = conf.stoch_discrete
         self.kl_weight = conf.kl_weight
         self.kl_balance = None if conf.kl_balance == 0.5 else conf.kl_balance
+        self.aux_critic_weight = conf.aux_critic_weight
 
         # Encoder
 
@@ -253,6 +261,22 @@ class WorldModel(nn.Module):
                              gru_layers=conf.gru_layers,
                              gru_type=conf.gru_type,
                              layer_norm=conf.layer_norm)
+
+        # Auxiliary critic
+
+        if conf.aux_critic:
+            self.ac_aux = ActorCritic(in_dim=features_dim,
+                                      out_actions=conf.action_dim,
+                                      layer_norm=conf.layer_norm,
+                                      gamma=conf.gamma_aux,
+                                      lambda_gae=conf.lambda_gae_aux,
+                                      entropy_weight=conf.entropy,
+                                      target_interval=conf.target_interval_aux,
+                                      actor_grad=conf.actor_grad,
+                                      actor_dist=conf.actor_dist,
+                                      )
+        else:
+            self.ac_aux = None
 
         # Init
 
@@ -278,7 +302,6 @@ class WorldModel(nn.Module):
                       do_image_pred=False,
                       forward_only=False
                       ):
-
         # Encoder
 
         embed = self.encoder(obs)
@@ -319,11 +342,27 @@ class WorldModel(nn.Module):
             z = post_samples.reshape(dpost.batch_shape + dpost.event_shape)
             loss_kl = dpost.log_prob(z) - dprior.log_prob(z)
 
+        # Auxiliary critic loss
+
+        if self.ac_aux:
+            features_tb = features.select(2, 0)  # (T,B,I) => (T,B) - assume I=1
+            (_, loss_critic_aux), metrics_ac, tensors_ac = \
+                self.ac_aux.training_step(features_tb,
+                                          obs['action'][1:],
+                                          obs['reward'],
+                                          obs['terminal'])
+            metrics.update(loss_critic_aux=metrics_ac['loss_critic'],
+                           policy_value_aux=metrics_ac['policy_value_im'])
+            tensors.update(policy_value_aux=tensors_ac['value'])
+        else:
+            loss_critic_aux = 0.0
+
         # Total loss
 
         assert loss_kl.shape == loss_reconstr.shape
         loss_model_tbi = self.kl_weight * loss_kl + loss_reconstr
         loss_model = -logavgexp(-loss_model_tbi, dim=2)
+        loss = loss_model.mean() + self.aux_critic_weight * loss_critic_aux
 
         # Metrics
 
@@ -354,4 +393,4 @@ class WorldModel(nn.Module):
                 tensors.update(**tensors_logprob)  # logprob_image, ...
                 tensors.update(**tensors_pred)  # image_pred, ...
 
-        return loss_model.mean(), features, states, out_state, metrics, tensors
+        return loss, features, states, out_state, metrics, tensors

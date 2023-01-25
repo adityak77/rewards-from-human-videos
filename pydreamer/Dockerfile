@@ -1,11 +1,15 @@
-# --build-arg ENV={standard|dmlab|minerl}
-ARG ENV=standard
+FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel AS base
 
-FROM pytorch/pytorch:1.8.1-cuda10.2-cudnn7-devel AS base
+# Fix nvidia package repo (see https://github.com/NVIDIA/nvidia-docker/issues/1631)
+RUN rm /etc/apt/sources.list.d/cuda.list && \
+    rm /etc/apt/sources.list.d/nvidia-ml.list && \
+    apt-key del 7fa2af80 && \
+    apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub && \
+    apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub
 
 # System packages for Atari, DMLab, MiniWorld... Throw in everything
 RUN apt-get update && apt-get install -y \
-    git xvfb python3.7-dev python3-setuptools \
+    git xvfb \
     libglu1-mesa libglu1-mesa-dev libgl1-mesa-dev libosmesa6-dev mesa-utils freeglut3 freeglut3-dev \
     libglew2.0 libglfw3 libglfw3-dev zlib1g zlib1g-dev libsdl2-dev libjpeg-dev lua5.1 liblua5.1-0-dev libffi-dev \
     build-essential cmake g++-4.8 pkg-config software-properties-common gettext \
@@ -16,14 +20,11 @@ RUN apt-get update && apt-get install -y \
 # Standard environments
 # ------------------------
 
-FROM base AS standard-env
-
 # Atari
 
 RUN pip3 install gym==0.19.0 atari-py==0.2.9 opencv-python
 RUN wget -L -nv http://www.atarimania.com/roms/Roms.rar && \
     unrar x Roms.rar && \
-    unzip ROMS.zip && \
     python3 -m atari_py.import_roms ROMS && \
     rm -rf Roms.rar ROMS.zip ROMS
 
@@ -93,8 +94,6 @@ RUN pip3 install memory-maze==1.0.2
 # PyDreamer
 # ------------------------
 
-FROM ${ENV}-env AS final
-
 WORKDIR /app
 
 COPY requirements.txt .
@@ -107,3 +106,5 @@ ENV PYTHONUNBUFFERED 1
 ENV LANG "C.UTF-8"
 
 COPY . .
+
+ENTRYPOINT ["sh", "scripts/xvfb_run.sh", "python3", "launch.py"]

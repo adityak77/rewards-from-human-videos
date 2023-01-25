@@ -32,10 +32,11 @@ class MultiDecoder(nn.Module):
             assert False, conf.image_decoder
 
         if conf.reward_decoder_categorical:
-            self.reward = DenseCategoricalSupportDecoder(in_dim=features_dim,
-                                                         support=conf.reward_decoder_categorical,
-                                                         hidden_layers=conf.reward_decoder_layers,
-                                                         layer_norm=conf.layer_norm)
+            self.reward = DenseCategoricalSupportDecoder(
+                in_dim=features_dim,
+                support=clip_rewards_np(conf.reward_decoder_categorical, conf.clip_rewards),  # reward_decoder_categorical values are untransformed 
+                hidden_layers=conf.reward_decoder_layers,
+                layer_norm=conf.layer_norm)
         else:
             self.reward = DenseNormalDecoder(in_dim=features_dim, hidden_layers=conf.reward_decoder_layers, layer_norm=conf.layer_norm)
 
@@ -60,14 +61,14 @@ class MultiDecoder(nn.Module):
             loss_reconstr += self.image_weight * loss_image_tbi
             metrics.update(loss_image=loss_image.detach().mean())
             tensors.update(loss_image=loss_image.detach(),
-                        image_rec=image_rec.detach())
+                           image_rec=image_rec.detach())
 
         if self.vecobs:
             loss_vecobs_tbi, loss_vecobs, vecobs_rec = self.vecobs.training_step(features, obs['vecobs'])
             loss_reconstr += self.vecobs_weight * loss_vecobs_tbi
             metrics.update(loss_vecobs=loss_vecobs.detach().mean())
             tensors.update(loss_vecobs=loss_vecobs.detach(),
-                        vecobs_rec=vecobs_rec.detach())
+                           vecobs_rec=vecobs_rec.detach())
 
         loss_reward_tbi, loss_reward, reward_rec = self.reward.training_step(features, obs['reward'])
         loss_reconstr += self.reward_weight * loss_reward_tbi
@@ -82,20 +83,27 @@ class MultiDecoder(nn.Module):
                        terminal_rec=terminal_rec.detach())
 
         if extra_metrics:
-            mask_rewardp = obs['reward'] > 0  # mask where reward is positive
-            loss_rewardp = loss_reward * mask_rewardp / mask_rewardp  # set to nan where ~mask
-            metrics.update(loss_rewardp=nanmean(loss_rewardp))
-            tensors.update(loss_rewardp=loss_rewardp)
-
-            mask_rewardn = obs['reward'] < 0  # mask where reward is negative
-            loss_rewardn = loss_reward * mask_rewardn / mask_rewardn  # set to nan where ~mask
-            metrics.update(loss_rewardn=nanmean(loss_rewardn))
-            tensors.update(loss_rewardn=loss_rewardn)
+            if isinstance(self.reward, DenseCategoricalSupportDecoder):
+                # TODO: logic should be moved to appropriate decoder
+                reward_cat = self.reward.to_categorical(obs['reward'])
+                for i in range(len(self.reward.support)):
+                    # Logprobs for specific categorical reward values
+                    mask_rewardp = reward_cat == i  # mask where categorical reward has specific value
+                    loss_rewardp = loss_reward * mask_rewardp / mask_rewardp  # set to nan where ~mask
+                    metrics[f'loss_reward{i}'] = nanmean(loss_rewardp)  # index by support bucket, not by value
+                    tensors[f'loss_reward{i}'] = loss_rewardp
+            else:
+                for sig in [-1, 1]:
+                    # Logprobs for positive and negative rewards
+                    mask_rewardp = torch.sign(obs['reward']) == sig  # mask where reward is positive or negative
+                    loss_rewardp = loss_reward * mask_rewardp / mask_rewardp  # set to nan where ~mask
+                    metrics[f'loss_reward{sig}'] = nanmean(loss_rewardp)
+                    tensors[f'loss_reward{sig}'] = loss_rewardp
 
             mask_terminal1 = obs['terminal'] > 0  # mask where terminal is 1
             loss_terminal1 = loss_terminal * mask_terminal1 / mask_terminal1  # set to nan where ~mask
-            metrics.update(loss_terminal1=nanmean(loss_terminal1))
-            tensors.update(loss_terminal1=loss_terminal1)
+            metrics['loss_terminal1'] = nanmean(loss_terminal1)
+            tensors['loss_terminal1'] = loss_terminal1
 
         return loss_reconstr, metrics, tensors
 
@@ -136,7 +144,7 @@ class ConvDecoder(nn.Module):
         self.model = nn.Sequential(
             # FC
             *layers,
-            nn.Unflatten(-1, (d * 32, 1, 1)),  # type: ignore
+            nn.Unflatten(-1, (d * 32, 1, 1)),
             # Deconv
             nn.ConvTranspose2d(d * 32, d * 4, kernels[0], stride),
             activation(),
@@ -318,14 +326,15 @@ class DenseCategoricalSupportDecoder(nn.Module):
     """
 
     def __init__(self, in_dim, support=[0.0, 1.0], hidden_dim=400, hidden_layers=2, layer_norm=True):
-        assert isinstance(support, list)
+        assert isinstance(support, (list, np.ndarray))
         super().__init__()
         self.model = MLP(in_dim, len(support), hidden_dim, hidden_layers, layer_norm)
-        self.support = nn.Parameter(torch.tensor(support), requires_grad=False)
+        self.support = np.array(support).astype(float)
+        self._support = nn.Parameter(torch.tensor(support).to(torch.float), requires_grad=False)
 
     def forward(self, features: Tensor) -> D.Distribution:
         y = self.model.forward(features)
-        p = CategoricalSupport(logits=y.float(), support=self.support.data)
+        p = CategoricalSupport(logits=y.float(), sup=self._support.data)
         return p
 
     def loss(self, output: D.Distribution, target: Tensor) -> Tensor:
@@ -334,7 +343,7 @@ class DenseCategoricalSupportDecoder(nn.Module):
 
     def to_categorical(self, target: Tensor) -> Tensor:
         # TODO: should interpolate between adjacent values, like in MuZero
-        distances = torch.square(target.unsqueeze(-1) - self.support)
+        distances = torch.square(target.unsqueeze(-1) - self._support)
         return distances.argmin(-1)
 
     def training_step(self, features: TensorTBIF, target: Tensor) -> Tuple[TensorTBI, TensorTB, TensorTB]:

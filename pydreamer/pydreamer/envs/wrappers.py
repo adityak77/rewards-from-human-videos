@@ -1,3 +1,7 @@
+import time
+from logging import exception
+from typing import Callable
+
 import gym
 import gym.spaces
 import numpy as np
@@ -8,11 +12,13 @@ class DictWrapper(gym.ObservationWrapper):
         super().__init__(env)
         # self.observation_space = ...  # TODO
 
-    def observation(self, obs_img):
-        if len(obs_img.shape) == 1:
-            return {'vecobs': obs_img}  # Vector env
+    def observation(self, obs):
+        if isinstance(obs, dict):
+            return obs  # Already a dictionary
+        if len(obs.shape) == 1:
+            return {'vecobs': obs}  # Vector env
         else:
-            return {'image': obs_img}  # Image env
+            return {'image': obs}  # Image env
 
 
 class TimeLimitWrapper(gym.Wrapper):
@@ -53,7 +59,7 @@ class ActionRewardResetWrapper(gym.Wrapper):
             action_vec = action
         obs['action'] = action_vec
         obs['reward'] = np.array(reward)
-        obs['terminal'] = np.array(False if self.no_terminal or info.get('time_limit') else done)
+        obs['terminal'] = np.array(False if self.no_terminal or 'TimeLimit.truncated' in info or info.get('time_limit') else done)
         obs['reset'] = np.array(False)
         return obs, reward, done, info
 
@@ -103,3 +109,41 @@ class OneHotActionWrapper(gym.Wrapper):
 
     def reset(self):
         return self.env.reset()
+
+
+class RestartOnExceptionWrapper(gym.Wrapper):
+
+    def __init__(self, constructor: Callable):
+        self.constructor = constructor
+        env = constructor()
+        super().__init__(env)
+        self.env = env
+        self.last_obs = None
+
+    def step(self, action):
+        try:
+            obs, reward, done, info = self.env.step(action)
+            self.last_obs = obs
+            return obs, reward, done, info
+        except:
+            exception('Error in env.step() - terminating episode.')
+            # Dummy observation to terminate episode. time_limit=True to not count as terminal
+            return self.last_obs, 0.0, True, dict(time_limit=True)
+
+    def reset(self):
+        while True:
+            try:
+                obs = self.env.reset()
+                self.last_obs = obs
+                return obs
+            except:
+                exception('Error in env.reset() - recreating env.')
+                try:
+                    self.env.close()
+                except:
+                    pass
+                try:
+                    self.env = self.constructor()
+                except:
+                    pass
+            time.sleep(1)
