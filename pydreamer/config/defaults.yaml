@@ -134,9 +134,9 @@ tabletop:
   generator_workers: 1
   generator_prefill_steps: 5000
   entropy: 1.0e-4
-  actor_grad: dynamics
-  actor_dist: tanh_normal
-  clip_rewards: tanh
+  # actor_grad: dynamics
+  # actor_dist: tanh_normal
+  # clip_rewards: tanh
 
 minigrid:
   env_id: MiniGrid-MazeS11N-v0
