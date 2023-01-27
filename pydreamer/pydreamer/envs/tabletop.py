@@ -219,7 +219,7 @@ class Tabletop(SawyerXYZEnv):
         self.cur_path_length +=1
         low_dim_info = self._get_low_dim_info()
         
-        reward = self.reward_push_mug_forward(self.tabletop_obs(low_dim_info)) # self.compute_reward()
+        reward = 0 # self.reward_push_mug_forward(self.tabletop_obs(low_dim_info))
         return ob, reward, done, low_dim_info
    
     def tabletop_obs(self, info):
