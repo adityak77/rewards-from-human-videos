@@ -37,9 +37,9 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
     all_obs = []
     all_features = []
     
-    obs = {'image': init_state.unsqueeze(0).repeat(T, 1, 1, 1, 1), 
-           'action' : torch.transpose(ac_seqs, 0, 1),
-           'reset': torch.zeros((T, B), dtype=torch.bool, device=TORCH_DEVICE),
+    obs = {'image': init_state.unsqueeze(0), 
+           'action' : torch.zeros((1, B, 4), device=TORCH_DEVICE),
+           'reset': torch.zeros((1, B), dtype=torch.bool, device=TORCH_DEVICE),
           } # first input
     in_state = world_model.init_state(B * iwae_samples) # first input
     
