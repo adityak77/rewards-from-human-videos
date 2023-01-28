@@ -120,7 +120,7 @@ class Tabletop(SawyerXYZEnv):
 
         self.imsize = 64 # 120 # im size for y axis
         self.imsize_x = 64 # int(self.imsize * 1.5) # im size for x axis
-        # self.observation_space = Box(0, 1.0, (self.imsize_x*self.imsize*3, ))
+        # self.observation_space = Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
         self.goal_space = self.observation_space
         
         
@@ -243,7 +243,7 @@ class Tabletop(SawyerXYZEnv):
         return reward
 
     def get_obs(self):
-        obs = self.sim.render(self.imsize_x, self.imsize, camera_name="cam0") / 255.
+        obs = self.sim.render(self.imsize_x, self.imsize, camera_name="cam0")
         return obs
     
     def _set_obj_xyz(self, pos):

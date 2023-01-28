@@ -308,16 +308,16 @@ class WorldModel(nn.Module):
 
         # RSSM
 
-        print('embed diff', (embed[0] - embed[1]).sum())
+        # print('embed diff', (embed[0] - embed[1]).sum())
 
-        print('embed:', embed.shape)
-        print('obs[image]:', obs['image'].shape)
-        print('obs[action]:', obs['action'].shape)
-        print('obs[reward]:', obs['reward'].shape)
-        print('obs[reset]:', obs['reset'].shape)
-        print('obs[terminal]:', obs['terminal'].shape)
-        print('do_open_loop:', do_open_loop)
-        print('iwae_samples', iwae_samples)
+        # print('embed:', embed.shape)
+        # print('obs[image]:', obs['image'].shape, obs['image'].min(), obs['image'].max())
+        # print('obs[action]:', obs['action'].shape)
+        # print('obs[reward]:', obs['reward'].shape)
+        # print('obs[reset]:', obs['reset'].shape)
+        # print('obs[terminal]:', obs['terminal'].shape)
+        # print('do_open_loop:', do_open_loop)
+        # print('iwae_samples', iwae_samples)
 
         prior, post, post_samples, features, states, out_state = \
             self.core.forward(embed,

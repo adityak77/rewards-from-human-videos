@@ -125,6 +125,7 @@ if __name__ == '__main__':
 
     world_model = load_world_model(conf, args.saved_model_path)
     init_image = imageio.imread('init_state.png')
+    init_image = init_image.astype(np.float32) / 255.0 - 0.5
 
     # reading demos
     if os.path.isdir(args.demo_path):
@@ -162,8 +163,8 @@ if __name__ == '__main__':
 
         tstart = time.perf_counter()
 
-        states = np.zeros((1, TIMESTEPS+1, 120, 180, 3))
-        states[0] = init_image
+        states = np.zeros((1, TIMESTEPS+1, 120, 180, 3)) # in format [-0.5, 0.5]
+        states[0, 0] = init_image
         all_low_dim_states = np.zeros((TIMESTEPS, nx))
         actions = np.zeros((TIMESTEPS, nu))
 
@@ -184,8 +185,14 @@ if __name__ == '__main__':
                 prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
                 obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
 
+                # revert format of obs_sampled to be 0-1
+                obs_sampled += 0.5
+
                 sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
                 print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
+
+                for i in range(obs_sampled.shape[0]):
+                    imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'dream_traj{i}.gif'), (obs_sampled[i] * 255).astype(np.uint8))
 
                 # update elites
                 _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
@@ -209,6 +216,8 @@ if __name__ == '__main__':
                 tend = time.time()
                 print(f'timestep {t} took {tend-tstart} seconds')
 
+                import ipdb; ipdb.set_trace()
+
         # run open loop CEM if online sampling - not ready yet, and probably not worth
         # integrating with open loop since we can run a separate script to do this.
         else:
@@ -219,14 +228,12 @@ if __name__ == '__main__':
                 states[0, t] = obs
 
         tend = time.perf_counter()
+        states += 0.5
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
-        if not args.engineered_rewards:
-            additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
-        else:
-            additional_reward = 0 # NA
-
+        additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+        
         # calculate success and reward of trajectory
         any_timestep_succ = False
         for t in range(TIMESTEPS):

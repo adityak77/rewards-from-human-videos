@@ -63,7 +63,8 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
             feature = world_model.core.to_feature(*state)
             cur_ac = ac_seqs[:, t]
             
-            all_features.append(feature)
+            if t > 0:
+                all_features.append(feature)
             _, state = world_model.core.cell.forward_prior(cur_ac, None, state)
 
         feature = world_model.core.to_feature(*state)
@@ -72,9 +73,9 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
 
         all_obs = world_model.decoder.image.forward(all_features)
 
-    all_obs_flat = all_obs.reshape((T+1)*B, C, 64, 64)
+    all_obs_flat = all_obs.reshape(T*B, C, 64, 64)
     all_obs = F.interpolate(all_obs_flat, size=(H, W), mode='bilinear')
-    all_obs = all_obs.reshape(T+1, B, C, H, W).detach().cpu().numpy()
+    all_obs = all_obs.reshape(T, B, C, H, W).detach().cpu().numpy()
 
     return all_obs.transpose(1, 0, 3, 4, 2) # should be B x T x H x W x C
 
