@@ -196,33 +196,32 @@ if __name__ == '__main__':
                 sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
                 print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
 
-                imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'dream_traj0.gif'), (obs_sampled[0] * 255).astype(np.uint8))
+                for i in range(obs_sampled.shape[0]):
+                    imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'dream_traj{i}.gif'), (obs_sampled[i] * 255).astype(np.uint8))
 
                 # update elites
                 _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
                 elites = action_samples[best_inds]
 
-                # actions_mean = elites.mean(dim=0)
-                # actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
-                # if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
-                #     actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
+                actions_mean = elites.mean(dim=0)
+                actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
+                if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                    actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
 
-                # # follow sampled trajectory
-                # action_distribution = MultivariateNormal(actions_mean, actions_cov)
-                # traj_sample = action_distribution.sample((1,))
+                # follow sampled trajectory
+                action_distribution = MultivariateNormal(actions_mean, actions_cov)
+                traj_sample = action_distribution.sample((1,))
 
-                for t in range(TIMESTEPS):
-                    action = action_samples[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
-                    obs, r, done, low_dim_info = env.step(action)
-                    states[0, t+1] = obs
-                    all_low_dim_states[t] = tabletop_obs(low_dim_info)
+                action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
+                obs, r, done, low_dim_info = env.step(action)
+                states[0, t+1] = obs
+                all_low_dim_states[t] = tabletop_obs(low_dim_info)
 
-                    actions[t, :] = action
+                actions[t, :] = action
                 tend = time.time()
                 print(f'timestep {t} took {tend-tstart} seconds')
-                break
 
-                # import ipdb; ipdb.set_trace()
+                import ipdb; ipdb.set_trace()
 
         # run open loop CEM if online sampling - not ready yet, and probably not worth
         # integrating with open loop since we can run a separate script to do this.
@@ -259,8 +258,6 @@ if __name__ == '__main__':
         # logging results
         all_obs = (states[0] * 255).astype(np.uint8)
         cem_logger.save_graphs(all_obs)
-
-        raise Exception('done')
 
         res_dict = {
             'total_iterations': cem_logger.total_iterations,
