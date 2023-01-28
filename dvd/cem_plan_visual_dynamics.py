@@ -196,9 +196,6 @@ if __name__ == '__main__':
                 sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
                 print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
 
-                for i in range(obs_sampled.shape[0]):
-                    imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'dream_traj{i}.gif'), (obs_sampled[i] * 255).astype(np.uint8))
-
                 # update elites
                 _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
                 elites = action_samples[best_inds]
@@ -220,8 +217,6 @@ if __name__ == '__main__':
                 actions[t, :] = action
                 tend = time.time()
                 print(f'timestep {t} took {tend-tstart} seconds')
-
-                import ipdb; ipdb.set_trace()
 
         # run open loop CEM if online sampling - not ready yet, and probably not worth
         # integrating with open loop since we can run a separate script to do this.
