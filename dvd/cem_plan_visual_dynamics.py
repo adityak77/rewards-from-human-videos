@@ -15,7 +15,7 @@ import logging
 
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
-from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
+from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward, dvd_process_encode_batch
 from optimizer_utils import tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 from visual_dynamics_model import load_world_model, rollout_trajectory
@@ -142,6 +142,9 @@ if __name__ == '__main__':
     else:
         demos = [decode_gif(args.demo_path)]
 
+    if args.dvd:
+        demo_feats = [dvd_process_encode_batch(np.array([demo]), video_encoder) for demo in demos]
+
     # initialization
     actions_mean = torch.zeros(TIMESTEPS * nu)
     actions_cov = torch.eye(TIMESTEPS * nu)
@@ -179,7 +182,6 @@ if __name__ == '__main__':
         # if learned dynamics model then do closed loop
         if args.learn_dynamics_model:
             for t in range(TIMESTEPS):
-                tstart = time.time()
                 if t % closed_loop_frequency == 0:
                     action_distribution = MultivariateNormal(actions_mean, actions_cov)
                     action_samples = action_distribution.sample((N_SAMPLES,))
@@ -196,7 +198,10 @@ if __name__ == '__main__':
                     # revert format of obs_sampled to be 0-1
                     obs_sampled += 0.5
 
-                    sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+                    if args.dvd:
+                        sample_rewards = terminal_reward_fn(obs_sampled, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+                    elif args.vip:
+                        sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos)
                     print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
 
                     # update elites
@@ -218,8 +223,6 @@ if __name__ == '__main__':
                 all_low_dim_states[t] = tabletop_obs(low_dim_info)
 
                 actions[t, :] = action
-                tend = time.time()
-                print(f'timestep {t} took {tend-tstart} seconds')
 
         # run open loop CEM if online sampling - not ready yet, and probably not worth
         # integrating with open loop since we can run a separate script to do this.
@@ -235,7 +238,7 @@ if __name__ == '__main__':
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
-        additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+        additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         
         # calculate success and reward of trajectory
         any_timestep_succ = False
