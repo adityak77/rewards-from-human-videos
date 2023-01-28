@@ -238,7 +238,10 @@ if __name__ == '__main__':
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
-        additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+        if args.dvd:
+            additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+        elif args.vip:
+            additional_reward = terminal_reward_fn(states, _, demos=demos).item()
         
         # calculate success and reward of trajectory
         any_timestep_succ = False
