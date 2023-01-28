@@ -99,6 +99,8 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
+    closed_loop_frequency = 10
+
     dtype = torch.double
 
     # set random seed
@@ -176,34 +178,34 @@ if __name__ == '__main__':
         # if learned dynamics model then do closed loop
         if args.learn_dynamics_model:
             for t in range(TIMESTEPS):
-                print(t)
                 tstart = time.time()
-                action_distribution = MultivariateNormal(actions_mean, actions_cov)
-                action_samples = action_distribution.sample((N_SAMPLES,))
-                sample_rewards = torch.zeros(N_SAMPLES)
+                if t % closed_loop_frequency == 0:
+                    action_distribution = MultivariateNormal(actions_mean, actions_cov)
+                    action_samples = action_distribution.sample((N_SAMPLES,))
+                    sample_rewards = torch.zeros(N_SAMPLES)
 
-                ac_seqs = action_samples.reshape(N_SAMPLES, TIMESTEPS, nu)[:, t:]
-                assert (t + ac_seqs.shape[1]) == TIMESTEPS
-                init_states = np.tile(states[:, t].transpose(0, 3, 1, 2), (N_SAMPLES, 1, 1, 1))
-                obs_sampled = rollout_trajectory(init_states, ac_seqs, world_model) # shape B x (T-t) x H x W x C
+                    ac_seqs = action_samples.reshape(N_SAMPLES, TIMESTEPS, nu)[:, t:]
+                    assert (t + ac_seqs.shape[1]) == TIMESTEPS
+                    init_states = np.tile(states[:, t].transpose(0, 3, 1, 2), (N_SAMPLES, 1, 1, 1))
+                    obs_sampled = rollout_trajectory(init_states, ac_seqs, world_model) # shape B x (T-t) x H x W x C
 
-                prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
-                obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
+                    prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
+                    obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
 
-                # revert format of obs_sampled to be 0-1
-                obs_sampled += 0.5
+                    # revert format of obs_sampled to be 0-1
+                    obs_sampled += 0.5
 
-                sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
-                print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
+                    sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+                    print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
 
-                # update elites
-                _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
-                elites = action_samples[best_inds]
+                    # update elites
+                    _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
+                    elites = action_samples[best_inds]
 
-                actions_mean = elites.mean(dim=0)
-                actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
-                if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
-                    actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
+                    actions_mean = elites.mean(dim=0)
+                    actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
+                    if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                        actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
 
                 # follow sampled trajectory
                 action_distribution = MultivariateNormal(actions_mean, actions_cov)
