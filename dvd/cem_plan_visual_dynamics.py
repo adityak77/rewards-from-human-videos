@@ -14,7 +14,7 @@ import argparse
 import logging
 
 from sim_env.tabletop import Tabletop
-from optimizer_utils import CemLogger, decode_gif
+from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
 from optimizer_utils import tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
@@ -100,6 +100,11 @@ if __name__ == '__main__':
     nx = 13
 
     dtype = torch.double
+
+    # set random seed
+    if args.seed >= 0:
+        set_all_seeds(args.seed)
+        print(f"Using seed: {args.seed}")
 
     # only one of these reward functions allowed per run
     assert sum([args.dvd, args.vip]) == 1
@@ -228,7 +233,7 @@ if __name__ == '__main__':
                 states[0, t] = obs
 
         tend = time.perf_counter()
-        states += 0.5
+        states[0, 0] += 0.5
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
