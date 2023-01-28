@@ -160,7 +160,6 @@ def dvd_reward(states, actions, **kwargs):
     video_encoder = kwargs['video_encoder']
     sim_discriminator = kwargs['sim_discriminator']
     
-    command_start = time.perf_counter()
     rewards_demo = torch.zeros(states.shape[0], device=device)
     states = (states * 255).astype(np.uint8)
     states_feats = dvd_process_encode_batch(states, video_encoder)
@@ -176,9 +175,6 @@ def dvd_reward(states, actions, **kwargs):
 
             rewards_demo += torch.cat(rewards_list, dim=0)
     rewards = rewards_demo / len(demo_feats)
-
-    elapsed = time.perf_counter() - command_start
-    print(f"Video similarity inference elapsed time: {elapsed:.4f}s")
 
     return rewards
 

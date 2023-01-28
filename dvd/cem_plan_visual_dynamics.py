@@ -43,7 +43,7 @@ def get_args_conf():
     parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
     # learned visual dynamics model
-    parser.add_argument("--learn_dynamics_model", action='store_true', default=False, help='Learn a dynamics model (otherwise use online sampling)')
+    parser.add_argument("--learn_dynamics_model", action='store_true', default=False, required=True, help='Learn a dynamics model (otherwise use online sampling)')
     parser.add_argument("--configs", nargs='+', required=True)
     parser.add_argument("--saved_model_path", type=str, default='/home/akannan2/tabletop_dynamics_old/artifacts/checkpoints/latest.pt')
 
@@ -112,9 +112,6 @@ if __name__ == '__main__':
     # only one of these reward functions allowed per run
     assert sum([args.dvd, args.vip]) == 1
 
-    if args.learn_dynamics_model:
-        assert args.configs and args.saved_model_path
-
     # assigning reward functions
     if args.dvd:
         assert args.demo_path is not None
@@ -133,7 +130,6 @@ if __name__ == '__main__':
 
     world_model = load_world_model(conf, args.saved_model_path)
     init_image = imageio.imread('init_state.png')
-    init_image = init_image.astype(np.float32) / 255.0 - 0.5
 
     # reading demos
     if os.path.isdir(args.demo_path):
@@ -175,63 +171,51 @@ if __name__ == '__main__':
         tstart = time.perf_counter()
 
         states = np.zeros((1, TIMESTEPS+1, 120, 180, 3)) # in format [-0.5, 0.5]
-        states[0, 0] = init_image
+        states[0, 0] = init_image.astype(np.float32) / 255.0 - 0.5
         all_low_dim_states = np.zeros((TIMESTEPS, nx))
         actions = np.zeros((TIMESTEPS, nu))
 
-        # if learned dynamics model then do closed loop
-        if args.learn_dynamics_model:
-            for t in range(TIMESTEPS):
-                if t % closed_loop_frequency == 0:
-                    action_distribution = MultivariateNormal(actions_mean, actions_cov)
-                    action_samples = action_distribution.sample((N_SAMPLES,))
-                    sample_rewards = torch.zeros(N_SAMPLES)
-
-                    ac_seqs = action_samples.reshape(N_SAMPLES, TIMESTEPS, nu)[:, t:]
-                    assert (t + ac_seqs.shape[1]) == TIMESTEPS
-                    init_states = np.tile(states[:, t].transpose(0, 3, 1, 2), (N_SAMPLES, 1, 1, 1))
-                    obs_sampled = rollout_trajectory(init_states, ac_seqs, world_model) # shape B x (T-t) x H x W x C
-
-                    prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
-                    obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
-
-                    # revert format of obs_sampled to be 0-1
-                    obs_sampled += 0.5
-
-                    if args.dvd:
-                        sample_rewards = terminal_reward_fn(obs_sampled, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
-                    elif args.vip:
-                        sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos)
-                    print(f'sample_rewards timestep {t}:', sample_rewards.min(), sample_rewards.mean(), sample_rewards.max())
-
-                    # update elites
-                    _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
-                    elites = action_samples[best_inds]
-
-                    actions_mean = elites.mean(dim=0)
-                    actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
-                    if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
-                        actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
-
-                # follow sampled trajectory
+        for t in range(TIMESTEPS):
+            if t % closed_loop_frequency == 0:
                 action_distribution = MultivariateNormal(actions_mean, actions_cov)
-                traj_sample = action_distribution.sample((1,))
+                action_samples = action_distribution.sample((N_SAMPLES,))
+                sample_rewards = torch.zeros(N_SAMPLES)
 
-                action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
-                obs, r, done, low_dim_info = env.step(action)
-                states[0, t+1] = obs
-                all_low_dim_states[t] = tabletop_obs(low_dim_info)
+                ac_seqs = action_samples.reshape(N_SAMPLES, TIMESTEPS, nu)[:, t:]
+                assert (t + ac_seqs.shape[1]) == TIMESTEPS
+                init_states = np.tile(states[:, t].transpose(0, 3, 1, 2), (N_SAMPLES, 1, 1, 1))
+                obs_sampled = rollout_trajectory(init_states, ac_seqs, world_model) # shape B x (T-t) x H x W x C
 
-                actions[t, :] = action
+                prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
+                obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
 
-        # run open loop CEM if online sampling - not ready yet, and probably not worth
-        # integrating with open loop since we can run a separate script to do this.
-        else:
-            assert False
-            for t in range(TIMESTEPS):
-                action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
-                obs, r, done, low_dim_info = env.step(action)
-                states[0, t] = obs
+                # revert format of obs_sampled to be 0-1
+                obs_sampled += 0.5
+
+                if args.dvd:
+                    sample_rewards = terminal_reward_fn(obs_sampled, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+                elif args.vip:
+                    sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos)
+
+                # update elites
+                _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
+                elites = action_samples[best_inds]
+
+                actions_mean = elites.mean(dim=0)
+                actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
+                if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                    actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
+
+            # follow sampled trajectory
+            action_distribution = MultivariateNormal(actions_mean, actions_cov)
+            traj_sample = action_distribution.sample((1,))
+
+            action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
+            obs, r, done, low_dim_info = env.step(action)
+            states[0, t+1] = obs
+            all_low_dim_states[t] = tabletop_obs(low_dim_info)
+
+            actions[t, :] = action
 
         tend = time.perf_counter()
         states[0, 0] += 0.5

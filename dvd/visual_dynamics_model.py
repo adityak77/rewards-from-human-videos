@@ -6,12 +6,11 @@ import numpy as np
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
-from torch import Tensor
 
 import sys
 sys.path.append('/home/akannan2/rewards-from-human-videos/pydreamer')
 from pydreamer.models.dreamer import Dreamer
-from pydreamer.models.functions import map_structure, flatten_batch
+from pydreamer.models.functions import map_structure
 
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -82,29 +81,3 @@ def load_world_model(conf, model_weights_path):
     model.load_state_dict(torch.load(model_weights_path)['model_state_dict'])
     world_model = model.wm
     return world_model.to(TORCH_DEVICE).eval()
-
-
-'''
-def rollout_step(world_model,
-                 obs: Dict[str, torch.Tensor], 
-                 in_state: torch.Tensor, 
-                 iwae_samples=1, 
-                 do_open_loop=False):
-    # Encoder
-    embed = world_model.encoder(obs)
-
-    # RSSM
-    prior, post, post_samples, features, states, out_state = \
-        world_model.core.forward(embed,
-                            obs['action'],
-                            obs['reset'],
-                            in_state,
-                            iwae_samples=iwae_samples,
-                            do_open_loop=do_open_loop)
-
-    # Decoder
-
-    decoded = world_model.decoder.image.forward(features)
-
-    return features, out_state, decoded
-'''
