@@ -45,12 +45,7 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
     
     with torch.no_grad():
         embed = world_model.encoder(obs) # only obs['image'] used here
-        print('embed:', embed.size())
-
-        print('obs[image]:', obs['image'].size())
-        print('obs[action]:', obs['action'].size())
-        print('obs[reset]:', obs['reset'].size())
-        prior, post, post_samples, features, states, out_state = \
+        _, _, _, _, states, _ = \
             world_model.core.forward(embed,
                                     obs['action'],
                                     obs['reset'],

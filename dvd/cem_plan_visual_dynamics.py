@@ -31,6 +31,7 @@ logging.basicConfig(level=logging.DEBUG,
                     format='[%(levelname)s %(asctime)s %(pathname)s:%(lineno)d] %(message)s',
                     datefmt='%m-%d %H:%M:%S')
 logging.getLogger('matplotlib.font_manager').disabled = True
+logging.getLogger('PIL').disabled = True
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
