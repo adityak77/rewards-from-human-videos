@@ -43,7 +43,6 @@ def get_args_conf():
     parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
     # learned visual dynamics model
-    parser.add_argument("--learn_dynamics_model", action='store_true', default=False, required=True, help='Learn a dynamics model (otherwise use online sampling)')
     parser.add_argument("--configs", nargs='+', required=True)
     parser.add_argument("--saved_model_path", type=str, required=True)
 
@@ -212,13 +211,14 @@ if __name__ == '__main__':
 
             action = traj_sample[0, t*nu:(t+1)*nu].cpu().numpy() # from CEM
             obs, r, done, low_dim_info = env.step(action)
-            states[0, t+1] = obs
+            states[0, t+1] = obs - 0.5
             all_low_dim_states[t] = tabletop_obs(low_dim_info)
 
             actions[t, :] = action
 
         tend = time.perf_counter()
-        states[0, 0] += 0.5
+        # switch back to [0-1] format
+        states[0] += 0.5
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
