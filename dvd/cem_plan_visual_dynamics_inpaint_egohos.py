@@ -8,7 +8,7 @@ from torch import nn as nn
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
-import tqdm
+from tqdm import tqdm
 import imageio
 import pickle
 
@@ -117,7 +117,7 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
-    closed_loop_frequency = 10
+    closed_loop_frequency = 26
 
     dtype = torch.double
 
