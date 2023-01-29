@@ -177,7 +177,7 @@ if __name__ == '__main__':
     elif args.vip:
         logdir = 'vip'
     
-    logdir = 'visual_dynamics_inpaint_egohos' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
+    logdir = 'visual_dynamics_inpaint_egohos_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
     run = 0
     while os.path.isdir(logdir + f'_run{run}'):
