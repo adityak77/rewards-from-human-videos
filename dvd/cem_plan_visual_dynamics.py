@@ -45,7 +45,7 @@ def get_args_conf():
     # learned visual dynamics model
     parser.add_argument("--learn_dynamics_model", action='store_true', default=False, required=True, help='Learn a dynamics model (otherwise use online sampling)')
     parser.add_argument("--configs", nargs='+', required=True)
-    parser.add_argument("--saved_model_path", type=str, default='/home/akannan2/tabletop_dynamics_old/artifacts/checkpoints/latest.pt')
+    parser.add_argument("--saved_model_path", type=str, required=True)
 
     # optimizer specific
     parser.add_argument("--dvd", action='store_true', help='Use dvd rewards')

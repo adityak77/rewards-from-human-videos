@@ -219,28 +219,8 @@ class Tabletop(SawyerXYZEnv):
         self.cur_path_length +=1
         low_dim_info = self._get_low_dim_info()
         
-        reward = 0 # self.reward_push_mug_forward(self.tabletop_obs(low_dim_info))
+        reward = 0
         return ob, reward, done, low_dim_info
-   
-    def tabletop_obs(self, info):
-        '''
-        Convert env_info outputs from env.step() function into state
-        '''
-        hand = np.array([info['hand_x'], info['hand_y'], info['hand_z']])
-        mug = np.array([info['mug_x'], info['mug_y'], info['mug_z']])
-        mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
-        init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
-        return init_low_dim
-
-    def reward_push_mug_forward(self, state):
-        very_start = np.array([0.01174369, 0.50146557, 0.03606395, 0, 0.6, 0, 1, 0, 0, 0, -0.07, 0, 0])
-        x_shift = np.abs(state[3] - very_start[3])
-        forward = -np.abs(state[4] - very_start[4] - 0.115) + 0.115
-
-        penalty = 0 if (x_shift < 0.05) else -100
-        reward = forward + penalty
-
-        return reward
 
     def get_obs(self):
         obs = self.sim.render(self.imsize_x, self.imsize, camera_name="cam0")
