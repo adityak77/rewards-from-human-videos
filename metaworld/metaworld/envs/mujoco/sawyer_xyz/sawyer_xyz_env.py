@@ -386,7 +386,7 @@ class SawyerXYZEnv(SawyerMocapBase, metaclass=abc.ABCMeta):
 
     @property
     def observation_space(self):
-        return Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
+        return Box(low=0, high=255, shape=(128, 128, 3), dtype=np.uint8)
 
     @_assert_task_is_set
     def step(self, action):
