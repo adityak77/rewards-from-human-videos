@@ -30,9 +30,6 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
     ac_seqs = ac_seqs.float().to(TORCH_DEVICE)
     init_state = torch.tensor(init_state, dtype=torch.float32, device=TORCH_DEVICE)
 
-    # init_state tensor must be resized to 128x128 
-    init_state = F.interpolate(init_state, size=(128, 128), mode='bilinear')
-
     all_obs = []
     all_features = []
     
@@ -67,9 +64,7 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
 
         all_obs = world_model.decoder.image.forward(all_features)
 
-    all_obs_flat = all_obs.reshape(T*B, C, 128, 128)
-    all_obs = F.interpolate(all_obs_flat, size=(H, W), mode='bilinear')
-    all_obs = all_obs.reshape(T, B, C, H, W).detach().cpu().numpy()
+    all_obs = all_obs.detach().cpu().numpy()
 
     return all_obs.transpose(1, 0, 3, 4, 2) # should be B x T x H x W x C
 

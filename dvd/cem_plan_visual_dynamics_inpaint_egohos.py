@@ -117,7 +117,7 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
-    closed_loop_frequency = 26
+    closed_loop_frequency = 100 # do open loop for now
 
     dtype = torch.double
 
@@ -152,7 +152,6 @@ if __name__ == '__main__':
         terminal_reward_fn = vip_reward
 
     world_model = load_world_model(conf, args.saved_model_path)
-    init_image = imageio.imread('init_state.png')
 
     # reading demos
     if os.path.isdir(args.demo_path):
@@ -193,11 +192,12 @@ if __name__ == '__main__':
                     verbose=args.verbose)  # bypass the default TimeLimit wrapper
         _, start_info = env.reset_model()
         very_start = tabletop_obs(start_info)
+        init_image = env.get_obs()
 
         tstart = time.perf_counter()
 
-        states = np.zeros((1, TIMESTEPS+1, 120, 180, 3)) # in format [-0.5, 0.5]
-        states[0, 0] = init_image.astype(np.float32) / 255.0 - 0.5
+        states = np.zeros((1, TIMESTEPS+1, 128, 128, 3)) # in format [-0.5, 0.5]
+        states[0, 0] = init_image.astype(np.float32) - 0.5
         all_low_dim_states = np.zeros((TIMESTEPS, nx))
         actions = np.zeros((TIMESTEPS, nu))
 
@@ -215,7 +215,7 @@ if __name__ == '__main__':
                 prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
                 obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
 
-                # revert format of obs_sampled to be 0-1
+                # revert format of obs_sampled to be 0-1 for reward calculation
                 obs_sampled += 0.5
 
                 # Inpaint states here
