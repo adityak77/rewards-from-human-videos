@@ -117,7 +117,7 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
-    closed_loop_frequency = 10
+    closed_loop_frequency = 30 # run visual dynamics only twice per iteration
 
     dtype = torch.double
 
