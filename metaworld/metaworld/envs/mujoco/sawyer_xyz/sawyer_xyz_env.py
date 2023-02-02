@@ -386,24 +386,7 @@ class SawyerXYZEnv(SawyerMocapBase, metaclass=abc.ABCMeta):
 
     @property
     def observation_space(self):
-        obs_obj_max_len = self._obs_obj_max_len if self.isV2 else 6
-
-        obj_low = np.full(obs_obj_max_len, -np.inf)
-        obj_high = np.full(obs_obj_max_len, +np.inf)
-        goal_low = np.zeros(3) if self._partially_observable \
-            else self.goal_space.low
-        goal_high = np.zeros(3) if self._partially_observable \
-            else self.goal_space.high
-        gripper_low = -1.
-        gripper_high = +1.
-
-        return Box(
-            np.hstack((self._HAND_SPACE.low, gripper_low, obj_low, self._HAND_SPACE.low, gripper_low, obj_low, goal_low)),
-            np.hstack((self._HAND_SPACE.high, gripper_high, obj_high, self._HAND_SPACE.high, gripper_high, obj_high, goal_high))
-        ) if self.isV2 else Box(
-            np.hstack((self._HAND_SPACE.low, obj_low, goal_low)),
-            np.hstack((self._HAND_SPACE.high, obj_high, goal_high))
-        )
+        return Box(low=0, high=255, shape=(128, 128, 3), dtype=np.uint8)
 
     @_assert_task_is_set
     def step(self, action):
