@@ -138,6 +138,8 @@ tabletop:
   # actor_dist: tanh_normal
   # clip_rewards: tanh
 
+  image_size: 128
+
 minigrid:
   env_id: MiniGrid-MazeS11N-v0
   # Features

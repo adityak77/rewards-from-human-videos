@@ -120,7 +120,7 @@ class ConvDecoder(nn.Module):
                  ):
         super().__init__()
         self.in_dim = in_dim
-        kernels = (5, 5, 6, 6)
+        kernels = (5, 5, 5, 6, 6)
         stride = 2
         d = cnn_depth
         if mlp_layers == 0:
@@ -146,13 +146,15 @@ class ConvDecoder(nn.Module):
             *layers,
             nn.Unflatten(-1, (d * 32, 1, 1)),
             # Deconv
-            nn.ConvTranspose2d(d * 32, d * 4, kernels[0], stride),
+            nn.ConvTranspose2d(d * 32, d * 8, kernels[0], stride),
             activation(),
-            nn.ConvTranspose2d(d * 4, d * 2, kernels[1], stride),
+            nn.ConvTranspose2d(d * 8, d * 4, kernels[1], stride),
             activation(),
-            nn.ConvTranspose2d(d * 2, d, kernels[2], stride),
+            nn.ConvTranspose2d(d * 4, d * 2, kernels[2], stride),
             activation(),
-            nn.ConvTranspose2d(d, out_channels, kernels[3], stride))
+            nn.ConvTranspose2d(d * 2, d, kernels[3], stride),
+            activation(),
+            nn.ConvTranspose2d(d, out_channels, kernels[4], stride))
 
     def forward(self, x: Tensor) -> Tensor:
         x, bd = flatten_batch(x)

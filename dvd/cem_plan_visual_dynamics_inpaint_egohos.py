@@ -2,11 +2,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
+import cv2
 import numpy as np
 from torch import nn as nn
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
+from tqdm import tqdm
 import imageio
 import pickle
 
@@ -19,6 +21,8 @@ from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_re
 from optimizer_utils import tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 from visual_dynamics_model import load_world_model, rollout_trajectory
+
+from inpaint_utils import get_human_cfg, get_robot_cfg, get_segmentation_model, get_inpaint_model, inpaint, get_segmentation_model_egohos, inpaint_egohos
 
 from distutils.util import strtobool
 
@@ -58,12 +62,26 @@ def get_args_conf():
     parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
     parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
     parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks') # needs to exist for MultiColumn init
+    parser.add_argument('--no_robot_inpaint', action='store_true', default=False, help='do not inpaint robot (for speed)')
 
     # env initialization
     parser.add_argument("--log_dir", type=str, default="mppi")
     parser.add_argument("--env_log_freq", type=int, default=20) 
     parser.add_argument("--verbose", type=bool, default=1) 
     parser.add_argument("--xml", type=str, default='env1')
+
+    # E2FGVI args
+    parser.add_argument("-c", "--ckpt", type=str, default='/home/akannan2/inpainting/E2FGVI/release_model/E2FGVI-HQ-CVPR22.pth')
+    parser.add_argument("--model", type=str, default='e2fgvi_hq', choices=['e2fgvi', 'e2fgvi_hq'])
+    parser.add_argument("--step", type=int, default=10)
+    parser.add_argument("--num_ref", type=int, default=-1)
+    parser.add_argument("--neighbor_stride", type=int, default=1)
+    parser.add_argument("--savefps", type=int, default=24)
+
+    # args for e2fgvi_hq (which can handle videos with arbitrary resolution)
+    parser.add_argument("--set_size", action='store_true', default=False)
+    parser.add_argument("--width", type=int)
+    parser.add_argument("--height", type=int)
 
     args, remaining = parser.parse_known_args()
 
@@ -111,6 +129,12 @@ if __name__ == '__main__':
     # only one of these reward functions allowed per run
     assert sum([args.dvd, args.vip]) == 1
 
+    # load in models
+    robot_cfg = get_robot_cfg()
+    human_segmentation_model = get_segmentation_model_egohos()
+    robot_segmentation_model = get_segmentation_model(robot_cfg)
+    inpaint_model = get_inpaint_model(args)
+
     # assigning reward functions
     if args.dvd:
         assert args.demo_path is not None
@@ -136,6 +160,9 @@ if __name__ == '__main__':
     else:
         demos = [decode_gif(args.demo_path)]
 
+    # Inpaint demos here (and maintain same formatting)
+    demos = [inpaint_egohos(args, inpaint_model, human_segmentation_model, demo) for demo in demos]
+
     if args.dvd:
         demo_feats = [dvd_process_encode_batch(np.array([demo]), video_encoder) for demo in demos]
 
@@ -149,7 +176,7 @@ if __name__ == '__main__':
     elif args.vip:
         logdir = 'vip'
     
-    logdir = 'visual_dynamics_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
+    logdir = 'visual_dynamics_inpaint_egohos_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
     run = 0
     while os.path.isdir(logdir + f'_run{run}'):
@@ -192,6 +219,32 @@ if __name__ == '__main__':
                 # revert format of obs_sampled to be 0-1 for reward calculation
                 obs_sampled += 0.5
 
+                # Inpaint states here
+                obs_sampled = (obs_sampled * 255).astype(np.uint8)
+
+                # reshape trajectories to have 30 timesteps instead of 51
+                downsample = TIMESTEPS // 30 + 1
+                if downsample > 1:
+                    downsample_boundary = (TIMESTEPS - 30) // (downsample - 1) * downsample
+                    obs_sampled = np.concatenate((obs_sampled[:, :downsample_boundary:downsample, :, :, :], obs_sampled[:, downsample_boundary:, :, :, :]), axis=1)
+                    obs_sampled = obs_sampled[:, :30, :, :, :]
+
+                if not args.no_robot_inpaint:
+                    # detectron2 input is BGR
+                    for i in range(len(obs_sampled)):
+                        for j in range(len(obs_sampled[i])):
+                            obs_sampled[i][j] = cv2.cvtColor(obs_sampled[i][j], cv2.COLOR_RGB2BGR)
+
+                    inpainted_states = []
+                    for sample in tqdm(obs_sampled):
+                        inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
+                    obs_sampled = np.array(inpainted_states)
+
+                    # convert back to RGB
+                    for i in range(len(obs_sampled)):
+                        for j in range(len(obs_sampled[i])):
+                            obs_sampled[i][j] = cv2.cvtColor(obs_sampled[i][j], cv2.COLOR_BGR2RGB)
+
                 if args.dvd:
                     sample_rewards = terminal_reward_fn(obs_sampled, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
                 elif args.vip:
@@ -221,12 +274,28 @@ if __name__ == '__main__':
         # switch back to [0-1] format
         states[0] += 0.5
 
+        # inpainted executed trajectory
+        inpaint_states = (states * 255).astype(np.uint8)
+
+        if not args.no_robot_inpaint:
+            # detectron2 input is BGR
+            for i in range(len(inpaint_states)):
+                for j in range(len(inpaint_states[i])):
+                    inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_RGB2BGR)
+
+            inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
+
+            # convert back to RGB
+            for i in range(len(inpaint_states)):
+                for j in range(len(inpaint_states[i])):
+                    inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_BGR2RGB)
+
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
         if args.dvd:
-            additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(inpaint_states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         elif args.vip:
-            additional_reward = terminal_reward_fn(states, _, demos=demos).item()
+            additional_reward = terminal_reward_fn(inpaint_states, _, demos=demos).item()
         
         # calculate success and reward of trajectory
         any_timestep_succ = False
@@ -246,7 +315,8 @@ if __name__ == '__main__':
 
         # logging results
         all_obs = (states[0] * 255).astype(np.uint8)
-        cem_logger.save_graphs(all_obs)
+        all_obs_inpainted = None if args.no_robot_inpaint else inpaint_states[0]
+        cem_logger.save_graphs(all_obs, all_obs_inpainted)
 
         res_dict = {
             'total_iterations': cem_logger.total_iterations,

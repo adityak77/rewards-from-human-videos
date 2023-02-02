@@ -147,16 +147,42 @@ def load_encoder_model(args):
 
     return model.to(device)
 
-def inference(states, demo, model, sim_discriminator):
+def dvd_reward(states, actions, **kwargs):
     """
     :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
-        T = trajectory size, nx = state embedding size 
-    :param demo: (T x H x W x C) List[np.ndarray]
+        K = batch size, T = trajectory size, nx = state embedding size
 
-    :returns reward: (K x 1) Tensor
+    :param actions: (K x T x nu) Tensor
+
+    :returns rewards: (K x 1) Tensor
     """
+    demo_feats = kwargs['demo_feats']
+    video_encoder = kwargs['video_encoder']
+    sim_discriminator = kwargs['sim_discriminator']
+    
+    rewards_demo = torch.zeros(states.shape[0], device=device)
     states = (states * 255).astype(np.uint8)
+    states_feats = dvd_process_encode_batch(states, video_encoder)
+    
+    sim_discriminator.eval()
+    with torch.no_grad():
+        for demo_feat in demo_feats:
+            rewards_list = []
+            for state_feat in states_feats:
+                logits = sim_discriminator.forward(state_feat.unsqueeze(0), demo_feat)
+                reward_samples = F.softmax(logits, dim=1)
+                rewards_list.append(reward_samples[:, 1])
 
+            rewards_demo += torch.cat(rewards_list, dim=0)
+    rewards = rewards_demo / len(demo_feats)
+
+    return rewards
+
+def dvd_process_encode_batch(samples, video_encoder):
+    """
+    :param samples: (K x T x H x W x C) np.ndarray
+        to prepare before encoding by networks
+    """
     transform = ComposeMix([
         [Scale(120), "img"],
         [torchvision.transforms.ToPILImage(), "img"],
@@ -167,67 +193,25 @@ def inference(states, demo, model, sim_discriminator):
                    std=[0.229, 0.224, 0.225]), "img"]
          ])
 
-    model.eval()
-    sim_discriminator.eval()
+    K, T, H, W, C = tuple(samples.shape)
 
-    # process states
-    def process_batch(samples):
-        """
-        :param samples: (K x T x H x W x C) np.ndarray
-            to prepare before encoding by networks
-        """
-        K, T, H, W, C = tuple(samples.shape)
+    samples = np.swapaxes(samples, 0, 1) # shape T x K x H x W x C
+    sample_downsample = samples[::max(1, len(samples) // 30)][:30] # downsample 30 x K x H x W x C
+    sample_downsample = np.swapaxes(sample_downsample, 0, 1) # shape K x 30 x H x W x C
 
-        samples = np.swapaxes(samples, 0, 1) # shape T x K x H x W x C
-        sample_downsample = samples[::max(1, len(samples) // 30)][:30] # downsample 30 x K x H x W x C
-        sample_downsample = np.swapaxes(sample_downsample, 0, 1) # shape K x 30 x H x W x C
+    sample_flattened = np.reshape(sample_downsample, (-1, H, W, C)) # Flatten as (K x 30) x H x W x C
+    sample_flattened = [elem for elem in sample_flattened] # need to convert to list to make PIL image conversion
 
-        sample_flattened = np.reshape(sample_downsample, (-1, H, W, C)) # Flatten as (K x 30) x H x W x C
-        sample_flattened = [elem for elem in sample_flattened] # need to convert to list to make PIL image conversion
+    # sample_transform should be K x 30 x C x 120 x 120 after cropping and trajectory downsampling
+    sample_transform = torch.stack(transform(sample_flattened))
+    sample_transform = sample_transform.reshape(K, 30, C, 120, 120).permute(0, 2, 1, 3, 4)
+    sample_data = [sample_transform.to(device)]
 
-        # sample_transform should be K x 30 x C x 120 x 120 after cropping and trajectory downsampling
-        sample_transform = torch.stack(transform(sample_flattened))
-        sample_transform = sample_transform.reshape(K, 30, C, 120, 120).permute(0, 2, 1, 3, 4)
-        sample_data = [sample_transform.to(device)]
-
-        return sample_data
-    
-    demo_data = process_batch(np.expand_dims(np.array(demo), axis=0))
-    states_data = process_batch(states)
-
-    # evaluate trajectory reward
+    video_encoder.eval()
     with torch.no_grad():
-        states_enc = model.encode(states_data) # K x 512
-        demo_enc = model.encode(demo_data) # 1 x 512
+        states_enc = video_encoder.encode(sample_data) # K x 512
 
-        logits = sim_discriminator.forward(states_enc, demo_enc.repeat(states_enc.shape[0], 1))
-        reward_samples = F.softmax(logits, dim=1)
-
-    return reward_samples[:, 1]
-
-def dvd_reward(states, actions, **kwargs):
-    """
-    :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
-        K = batch size, T = trajectory size, nx = state embedding size
-
-    :param actions: (K x T x nu) Tensor
-
-    :returns rewards: (K x 1) Tensor
-    """
-    demos = kwargs['demos']
-    video_encoder = kwargs['video_encoder']
-    sim_discriminator = kwargs['sim_discriminator']
-    
-    command_start = time.perf_counter()
-    rewards_demo = torch.zeros(states.shape[0])
-    for demo in demos:
-        reward_list = [inference(sample[None], demo, video_encoder, sim_discriminator).cpu() for sample in states]
-        rewards_demo += torch.cat(reward_list, dim=0)
-    rewards = rewards_demo / len(demos)
-    elapsed = time.perf_counter() - command_start
-    print(f"Video similarity inference elapsed time: {elapsed:.4f}s")
-
-    return rewards
+    return states_enc
 
 def vip_reward(states, actions, **kwargs):
     """

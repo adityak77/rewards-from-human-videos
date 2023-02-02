@@ -33,7 +33,6 @@ parser.add_argument("--seed", type=int, default=-1, help="Random seed >= 0. If s
 parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
 # optimizer specific
-parser.add_argument("--learn_dynamics_model", action='store_true', default=False, help='Learn a dynamics model (otherwise use online sampling)')
 parser.add_argument("--engineered_rewards", action='store_true', default=False, help='Use hand engineered rewards or not')
 parser.add_argument("--dvd", action='store_true', help='Use dvd rewards')
 parser.add_argument("--vip", action='store_true', help='Use pretrained VIP embeddings for reward function')

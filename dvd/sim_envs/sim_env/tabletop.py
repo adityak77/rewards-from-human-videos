@@ -118,8 +118,8 @@ class Tabletop(SawyerXYZEnv):
             np.hstack((self.hand_high, obj_high)),
         )
 
-        self.imsize = 120 # im size for y axis
-        self.imsize_x = int(self.imsize * 1.5) # im size for x axis
+        self.imsize = 128 # im size for y axis
+        self.imsize_x = 128 # im size for x axis
         # self.observation_space = Box(0, 1.0, (self.imsize_x*self.imsize*3, ))
         self.goal_space = self.observation_space
         
