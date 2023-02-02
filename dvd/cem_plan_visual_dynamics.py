@@ -99,7 +99,7 @@ if __name__ == '__main__':
     nu = 4
     nx = 13
 
-    closed_loop_frequency = 100 # do open loop for now
+    closed_loop_frequency = 10
 
     dtype = torch.double
 
@@ -182,17 +182,15 @@ if __name__ == '__main__':
 
                 ac_seqs = action_samples.reshape(N_SAMPLES, TIMESTEPS, nu)[:, t:]
                 assert (t + ac_seqs.shape[1]) == TIMESTEPS
-                init_states = np.tile(states[:, t].transpose(0, 3, 1, 2), (N_SAMPLES, 1, 1, 1))
-                obs_sampled = rollout_trajectory(init_states, ac_seqs, world_model) # shape B x (T-t) x H x W x C
+                init_states = np.tile(states[:, :(t+1)].transpose(1, 0, 4, 2, 3), (1, N_SAMPLES, 1, 1, 1))
+                init_actions = np.tile(np.expand_dims(actions[:(t+1)], axis=1), (1, N_SAMPLES, 1))
+                obs_sampled = rollout_trajectory(init_states, init_actions, ac_seqs, world_model) # shape B x (T-t) x H x W x C
 
                 prefix_obs = np.tile(states[:, :(t+1)], (N_SAMPLES, 1, 1, 1, 1))
                 obs_sampled = np.concatenate((prefix_obs, obs_sampled), axis=1) # shape B x (T+1) x H x W x C
 
                 # revert format of obs_sampled to be 0-1 for reward calculation
                 obs_sampled += 0.5
-
-                for i in range(obs_sampled.shape[0]):
-                    imageio.mimsave(os.path.join(cem_logger.logdir_iteration, f'rollout_{i}.gif'), (obs_sampled[i] * 255).astype(np.uint8))
 
                 if args.dvd:
                     sample_rewards = terminal_reward_fn(obs_sampled, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)

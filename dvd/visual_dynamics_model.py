@@ -15,27 +15,29 @@ from pydreamer.models.functions import map_structure
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 @torch.no_grad()
-def rollout_trajectory(init_state, ac_seqs, world_model):
+def rollout_trajectory(init_state, init_actions, ac_seqs, world_model):
     """
-    :param init_state np.ndarray (B, C, H, W) - states should be same across batch
+    :param init_state np.ndarray (T_past, B, C, H, W) - states should be same across batch
+    :param init_actions np.ndarray (T_past, B, nu)
     :param ac_seqs torch.Tensor (B, T, nu)
 
     :return all_obs np.ndarray (B, T, H, W, C)
     """
-    B, C, H, W = init_state.shape
+    T_past, B, C, H, W = init_state.shape
     T = ac_seqs.shape[1]
     iwae_samples = 1
     do_open_loop = False
 
     ac_seqs = ac_seqs.float().to(TORCH_DEVICE)
     init_state = torch.tensor(init_state, dtype=torch.float32, device=TORCH_DEVICE)
+    init_actions = torch.tensor(init_actions, dtype=torch.float32, device=TORCH_DEVICE)
 
     all_obs = []
     all_features = []
     
-    obs = {'image': init_state.unsqueeze(0), 
-           'action' : torch.zeros((1, B, 4), device=TORCH_DEVICE),
-           'reset': torch.zeros((1, B), dtype=torch.bool, device=TORCH_DEVICE),
+    obs = {'image': init_state,
+           'action' : init_actions,
+           'reset': torch.zeros((T_past, B), dtype=torch.bool, device=TORCH_DEVICE),
           } # first input
     in_state = world_model.init_state(B * iwae_samples) # first input
     
@@ -49,7 +51,7 @@ def rollout_trajectory(init_state, ac_seqs, world_model):
                                     iwae_samples=iwae_samples,
                                     do_open_loop=do_open_loop)
 
-        state = map_structure(states, lambda x: x.detach()[0, :, 0])
+        state = map_structure(states, lambda x: x.detach()[-1, :, 0])
         for t in range(ac_seqs.shape[1]):
             feature = world_model.core.to_feature(*state)
             cur_ac = ac_seqs[:, t]
