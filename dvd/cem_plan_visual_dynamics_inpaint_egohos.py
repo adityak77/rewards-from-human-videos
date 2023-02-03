@@ -203,6 +203,8 @@ if __name__ == '__main__':
 
         for t in range(TIMESTEPS):
             if t % closed_loop_frequency == 0:
+                if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                    actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
                 action_distribution = MultivariateNormal(actions_mean, actions_cov)
                 action_samples = action_distribution.sample((N_SAMPLES,))
                 sample_rewards = torch.zeros(N_SAMPLES)
