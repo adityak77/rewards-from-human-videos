@@ -142,7 +142,10 @@ def compute_alignment_loss(embs,
 
     if not seq_lens:
         # assuming num_steps is approximately seq_lens * (seq_lens - 1) / 2
-        video_lengths = int(1 + np.sqrt(1 + 8 * num_steps)) // 2
+        disc = round(np.sqrt(1 + 8 * num_steps))
+        assert disc * disc == 1 + 8 * num_steps, "cannot find integer num_steps such that seq_lens * (seq_lens - 1) / 2, please provide your own steps and seq_lens."
+
+        video_lengths = (1 + disc) // 2
         seq_lens = torch.tensor(video_lengths, device=device).unsqueeze(0).repeat([batch_size])
 
     if not steps:
