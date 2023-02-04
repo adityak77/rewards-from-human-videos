@@ -80,12 +80,10 @@ def regression_loss(logits, labels, steps, num_steps, variance_lambda=0.001):
     steps = steps.to(torch.float32)
     beta = F.softmax(logits, dim=1) # softmax last dimension
 
-    # transform labels to start/end index labels in steps
-    start_labels = torch.tensor([steps[i, labels[i], 0] for i in range(len(labels))], device=device)
-    end_labels = torch.tensor([steps[i, labels[i], 0] for i in range(len(labels))], device=device)
-
-    def time_loss(idx, true_time):
+    def time_loss(idx, steps, beta, labels, variance_lambda):
         # idx = 0 for start time, idx = 1 for end time
+        # transform labels to start/end index labels in steps
+        true_time = torch.tensor([steps[i, labels[i], idx] for i in range(len(labels))], device=device)
         pred_time = torch.sum(steps[:, :, idx] * beta, dim=1)
 
         # variance aware regression loss
@@ -95,8 +93,8 @@ def regression_loss(logits, labels, steps, num_steps, variance_lambda=0.001):
         squared_error = (true_time - pred_time) ** 2
         return torch.mean(torch.exp(-pred_time_log_var) * squared_error + variance_lambda * pred_time_log_var)
 
-    start_loss = time_loss(0, start_labels)
-    end_loss = time_loss(1, end_labels)
+    start_loss = time_loss(0, steps, beta, labels, variance_lambda)
+    end_loss = time_loss(1, steps, beta, labels, variance_lambda)
 
     return start_loss + end_loss
 
