@@ -55,9 +55,6 @@ def _align(cycles, embs, num_steps, num_cycles, cycle_length, temperature):
 
 def gen_cycles(num_cycles, batch_size, cycle_length=2):
     """
-    Generate random cycles for the stochastic alignment loss. We generate random
-    cycles of length cycle_length and repeat them num_cycles times.
-
     param: num_cycles (int): number of cycles to generate
     param: batch_size (int): batch size
     param: cycle_length (int): length of each cycle
@@ -116,7 +113,6 @@ def compute_stochastic_alignment_loss(embs,
     return loss
 
 def compute_alignment_loss(embs,
-                           batch_size,
                            steps=None,
                            seq_lens=None,
                            num_cycles=20,
@@ -138,9 +134,10 @@ def compute_alignment_loss(embs,
     """
     embs = embs.to(device)
 
+    batch_size = embs.shape[0]
     num_steps = embs.shape[1]
 
-    if not seq_lens:
+    if seq_lens is None or steps is None:
         # assuming num_steps is approximately seq_lens * (seq_lens - 1) / 2
         disc = round(np.sqrt(1 + 8 * num_steps))
         assert disc * disc == 1 + 8 * num_steps, "cannot find integer num_steps such that seq_lens * (seq_lens - 1) / 2, please provide your own steps and seq_lens."
@@ -148,7 +145,6 @@ def compute_alignment_loss(embs,
         video_lengths = (1 + disc) // 2
         seq_lens = torch.tensor(video_lengths, device=device).unsqueeze(0).repeat([batch_size])
 
-    if not steps:
         steps_list = []
         for i in range(video_lengths):
             for j in range(i + 1, video_lengths):
@@ -167,3 +163,22 @@ def compute_alignment_loss(embs,
     )
 
     return loss
+
+def compute_hard_nearest_neighbor(anchor_embs, match_embs):
+    """
+    param: anchor_embs (torch.Tensor): anchor embeddings of shape (batch_size, num_chunks, emb_dim)
+    param: match_embs (torch.Tensor): embeddings to match from shape (batch_size, num_chunks, emb_dim)
+
+    return: hard_nearest_nbors (torch.Tensor): embeddings from match_embs that align with anchor_embs
+            of size (batch_size * num_chunks, emb_dim)
+    """
+
+    hard_nearest_nbors = []
+    for i in range(anchor_embs.shape[0]):
+        for j in range(anchor_embs.shape[1]):
+            anchor_emb = anchor_embs[i, j]
+            emb_distance = torch.square(match_embs[i] - anchor_emb).sum(dim=1)
+            hard_nearest_nbors.append(match_embs[i, torch.argmin(emb_distance)])
+
+    hard_nearest_nbors = torch.stack(hard_nearest_nbors, dim=0)
+    return hard_nearest_nbors

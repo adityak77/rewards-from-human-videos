@@ -19,7 +19,7 @@ import pickle
 import json
 from PIL import Image
 
-from similarity import train_similarity, validate_similarity
+from similarity_video import train_video_similarity, validate_video_similarity
 
 def main():
     # load args
@@ -183,14 +183,14 @@ def main():
             sys.exit(1)
 
         if args.similarity:
-            train_loss, train_top1, class_loss, false_pos_train, false_neg_train = train_similarity(args, 
+            train_loss, train_top1, enc_loss, class_loss, false_pos_train, false_neg_train = train_video_similarity(args, 
             train_loader, model, sim_discriminator, loss_class, optimizer, epoch)
         
         # evaluate on validation set
         if epoch % args.log_freq == 0:
             print("Evaluating on epoch", epoch)
             if args.similarity:
-                val_loss, val_top1, false_pos, false_neg = validate_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch)
+                val_loss, val_top1, false_pos, false_neg = validate_video_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch)
                 
             # set learning rate
             lr_decayer.step(val_loss)
@@ -198,7 +198,8 @@ def main():
             # plot learning
             plotter_dict = {}
             plotter_dict['loss'] = train_loss
-            plotter_dict['val_loss'] = 0 
+            plotter_dict['val_loss'] = 0
+            plotter_dict['enc_loss'] = enc_loss
             plotter_dict['class_loss'] = class_loss
             plotter_dict['val_acc'] = val_top1 
             plotter_dict['learning_rate'] = lr
