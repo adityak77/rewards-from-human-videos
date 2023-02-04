@@ -78,7 +78,6 @@ def regression_loss(logits, labels, num_steps, steps, seq_lens, variance_lambda=
     return: loss (torch.Tensor): loss
     """
     steps = steps.to(torch.float32)
-    import ipdb; ipdb.set_trace()
     beta = F.softmax(logits, dim=1) # softmax last dimension
 
     true_time = torch.sum(steps * labels, dim=1)

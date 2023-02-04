@@ -6,7 +6,7 @@ and https://github.com/June01/tcc_Temporal_Cycle_Consistency_Loss.pytorch.
 
 import torch
 import torch.nn.functional as F
-
+import numpy as np
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -15,7 +15,7 @@ def _align_single_cycle(cycle, embs, cycle_length, num_steps, temperature):
     n_idx = (torch.rand(1)*num_steps).long()[0]
 
     # Create labels
-    onehot_labels = torch.eye(num_steps)[n_idx].to(device)
+    labels = torch.tensor([n_idx], device=device)
 
     # Choose query feats for first frame.
     query_feats = embs[cycle[0], n_idx:n_idx + 1]
@@ -33,7 +33,7 @@ def _align_single_cycle(cycle, embs, cycle_length, num_steps, temperature):
         beta = F.softmax(similarity, dim=0).unsqueeze(1).repeat([1, num_channels])
         query_feats = torch.sum(beta * candidate_feats, dim=0, keepdim=True)
 
-    return similarity, onehot_labels
+    return similarity, labels
 
 def _align(cycles, embs, num_steps, num_cycles, cycle_length, temperature):
   """Align by finding cycles in embs."""
@@ -70,7 +70,7 @@ def gen_cycles(num_cycles, batch_size, cycle_length=2):
 
     return cycles
 
-def regression_loss(logits, labels, num_steps, steps, seq_lens, variance_lambda=0.001):
+def regression_loss(logits, labels, steps, num_steps, variance_lambda=0.001):
     """
     Compute the regression loss for the stochastic alignment loss. We use the
     MSE loss with variance regularization.
@@ -78,23 +78,30 @@ def regression_loss(logits, labels, num_steps, steps, seq_lens, variance_lambda=
     return: loss (torch.Tensor): loss
     """
     steps = steps.to(torch.float32)
-    import ipdb; ipdb.set_trace()
     beta = F.softmax(logits, dim=1) # softmax last dimension
 
-    true_time = torch.sum(steps * labels, dim=1)
-    pred_time = torch.sum(steps * beta, dim=1)
+    # transform labels to start/end index labels in steps
+    start_labels = torch.tensor([steps[i, labels[i], 0] for i in range(len(labels))], device=device)
+    end_labels = torch.tensor([steps[i, labels[i], 0] for i in range(len(labels))], device=device)
 
-    # variance aware regression loss
-    pred_time_tiled = pred_time.unsqueeze(1).repeat([1, num_steps])
-    pred_time_variance = torch.sum(beta * (steps - pred_time_tiled) ** 2, dim=1)
+    def time_loss(idx, true_time):
+        # idx = 0 for start time, idx = 1 for end time
+        pred_time = torch.sum(steps[:, :, idx] * beta, dim=1)
 
-    pred_time_log_var = torch.log(pred_time_variance)
-    squared_error = (true_time - pred_time) ** 2
-    return torch.mean(torch.exp(-pred_time_log_var) * squared_error + variance_lambda * pred_time_log_var)
+        # variance aware regression loss
+        pred_time_tiled = pred_time.unsqueeze(1).repeat([1, num_steps])
+        pred_time_variance = torch.sum(beta * (steps[:, :, idx] - pred_time_tiled) ** 2, dim=1)
+        pred_time_log_var = torch.log(pred_time_variance)
+        squared_error = (true_time - pred_time) ** 2
+        return torch.mean(torch.exp(-pred_time_log_var) * squared_error + variance_lambda * pred_time_log_var)
+
+    start_loss = time_loss(0, start_labels)
+    end_loss = time_loss(1, end_labels)
+
+    return start_loss + end_loss
 
 def compute_stochastic_alignment_loss(embs,
                                       steps,
-                                      seq_lens,
                                       num_steps,
                                       batch_size,
                                       num_cycles,
@@ -106,13 +113,14 @@ def compute_stochastic_alignment_loss(embs,
 
     # regression loss
     steps = steps[cycles[:, 0]]
-    seq_lens = seq_lens[cycles[:, 0]]
-    loss = regression_loss(logits, labels, num_steps, steps, seq_lens, variance_lambda)
+    loss = regression_loss(logits, labels, steps, num_steps, variance_lambda)
 
     return loss
 
 def compute_alignment_loss(embs,
                            batch_size,
+                           steps=None,
+                           seq_lens=None,
                            num_cycles=20,
                            cycle_length=2,
                            temperature=0.1,
@@ -123,21 +131,32 @@ def compute_alignment_loss(embs,
     with variance regularization. We use L2 norm for the similarity.
 
 
-    param: embs (torch.Tensor): frame embeddings of shape (batch_size, num_frames, emb_dim)
+    param: embs (torch.Tensor): frame embeddings of shape (batch_size, num_steps, emb_dim)
+        typically num_steps = seq_lens * (seq_lens - 1) / 2
     param: batch_size (int): batch size
+    param: steps (torch.Tensor): ground truth range of video embedding (batch_size, num_steps, 2)
+    param: seq_lens (torch.Tensor): length of each video in the batch (batch_size)
 
     """
     embs = embs.to(device)
 
     num_steps = embs.shape[1]
 
-    steps = torch.arange(0, num_steps, device=device).unsqueeze(0).repeat([batch_size, 1])
-    seq_lens = torch.tensor(num_steps, device=device).unsqueeze(0).repeat([batch_size])
+    if not seq_lens:
+        # assuming num_steps is approximately seq_lens * (seq_lens - 1) / 2
+        video_lengths = int(1 + np.sqrt(1 + 8 * num_steps)) // 2
+        seq_lens = torch.tensor(video_lengths, device=device).unsqueeze(0).repeat([batch_size])
+
+    if not steps:
+        steps_list = []
+        for i in range(video_lengths):
+            for j in range(i + 1, video_lengths):
+                steps_list.append([i, j])
+        steps = torch.tensor(steps_list, device=device).unsqueeze(0).repeat([batch_size, 1, 1])
 
     loss = compute_stochastic_alignment_loss(
         embs=embs,
         steps=steps,
-        seq_lens=seq_lens,
         num_steps=num_steps,
         batch_size=batch_size,
         num_cycles=num_cycles,
