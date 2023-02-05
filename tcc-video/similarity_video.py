@@ -10,15 +10,16 @@ from tcc_video_utils import compute_alignment_loss, compute_hard_nearest_neighbo
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def chunk_and_encode(args, model, data, traj_length, chunk_length):
+def chunk_and_encode(args, model, data, traj_length, min_chunk_length):
     chunks = []
     for sample in data:
         # sample : (3, traj_length, H, W)
         for i in range(traj_length):
-            for j in range(i + 1 + chunk_length, traj_length + 1):
+            for j in range(i + 1 + min_chunk_length, traj_length + 1):
                 chunks.append(sample[:, i:j].to(device))
 
     # chunks : (args.batch_size * K) x 3 x traj_length x H x W
+    import ipdb; ipdb.set_trace()
     chunk_enc = model.encode(chunks) # chunk_enc : (args.batch_size * K) x 512
     chunk_enc = chunk_enc.reshape(args.batch_size, -1, 512) # (args.batch_size, K, 512)
 
