@@ -253,6 +253,8 @@ def get_args():
     parser.add_argument('--root', type=str, default='./', help='root dir') 
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument('--human_tasks', nargs='*', default=[5, 41, 93], help='if using robot demos, which tasks to include robot demos for')
+    parser.add_argument('--train', action='store_true', help='inpaint training set')
+    parser.add_argument('--val', action='store_true', help='inpaint validation set')
 
     # E2FGVI args
     parser.add_argument("-c", "--ckpt", type=str, default='/home/akannan2/inpainting/E2FGVI/release_model/E2FGVI-HQ-CVPR22.pth')
@@ -272,6 +274,7 @@ def get_args():
     parser.add_argument("--twohands_checkpoint_file", default='/home/akannan2/inpainting/EgoHOS/mmsegmentation/work_dirs/seg_twohands_ccda/best_mIoU_iter_56000.pth', type=str)
 
     args = parser.parse_args()
+    assert args.train or args.val
     args.json_data_train = args.root + "something-something-v2-train.json"
     args.json_data_val = args.root + "something-something-v2-validation.json"
     args.json_data_test = args.root + "something-something-v2-test.json"
@@ -284,7 +287,11 @@ def get_args():
 
 def main(args):
     root = os.path.join(args.human_data_dir, '20bn-something-something-v2')
-    json_file_input = args.json_data_train
+    if args.train:
+        json_file_input = args.json_data_train
+    elif args.val:
+        json_file_input = args.json_data_val
+
     json_file_labels = args.json_file_labels
     tasks = args.human_tasks
 
