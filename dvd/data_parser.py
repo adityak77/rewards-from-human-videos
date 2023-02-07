@@ -37,7 +37,7 @@ class DatasetBase(object):
         self.classes = self.read_json_labels()
         self.classes_dict = self.get_two_way_dict(self.classes)
         self.json_data = self.read_json_input()
-        print("Number of human videos:", self.num_occur.values())
+        print("Number of human videos:", self.num_occur)
         
         
     def read_json_input(self):
