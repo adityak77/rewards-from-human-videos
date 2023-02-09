@@ -388,6 +388,19 @@ def reward_push_mug_close(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
+def reward_open_drawer(state, action, **kwargs):
+    '''
+    task 46: opening drawer
+    '''
+    very_start = kwargs['very_start']
+    right_to_left = np.abs(state[3] - very_start[3])
+    open = -state[10]
+
+    penalty = 0 if right_to_left < 0.01 else -100
+    reward = open + penalty
+
+    return torch.Tensor([reward]).to(torch.float32)
+
 def tabletop_obs(info):
     '''
     Convert env_info outputs from env.step() function into state
@@ -409,6 +422,8 @@ def get_engineered_reward(task_id):
         terminal_reward_fn = reward_push_mug_left_to_right
     elif task_id == 44:
         terminal_reward_fn = reward_push_mug_close
+    elif task_id == 46:
+        terminal_reward_fn = reward_open_drawer
 
     return terminal_reward_fn
 
@@ -438,6 +453,11 @@ def get_success_values(task_id, low_dim_state, very_start):
         gt_reward = -np.abs(rew - 0.08) + 0.08
         penalty = 0 
         success_threshold = 0.04
+    elif task_id == 46:
+        rew = -low_dim_state[10]
+        gt_reward = -low_dim_state[10]
+        penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
+        success_threshold = 0.10
 
     gt_reward += penalty
     succ = gt_reward > success_threshold
