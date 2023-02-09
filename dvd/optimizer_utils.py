@@ -368,13 +368,14 @@ def reward_close_drawer(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_turn_faucet_left_to_right(state, action, **kwargs):
+def reward_push_mug_left_to_right(state, action, **kwargs):
     '''
     task 93: move something left to right
     '''
-    move_faucet = -state[12]
+    very_start = kwargs['very_start']
+    left_to_right = -np.abs(-state[3] + very_start[3] - 0.15) + 0.15
 
-    reward = move_faucet
+    reward = left_to_right
 
     return torch.Tensor([reward]).to(torch.float32)
 
@@ -405,7 +406,7 @@ def get_engineered_reward(task_id):
     elif task_id == 5:
         terminal_reward_fn = reward_close_drawer
     elif task_id == 93:
-        terminal_reward_fn = reward_turn_faucet_left_to_right
+        terminal_reward_fn = reward_push_mug_left_to_right
     elif task_id == 44:
         terminal_reward_fn = reward_push_mug_close
 
@@ -428,10 +429,10 @@ def get_success_values(task_id, low_dim_state, very_start):
         penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
         success_threshold = -0.01
     elif task_id == 93:
-        rew = -low_dim_state[12]
+        rew = -low_dim_state[3] + very_start[3]
         gt_reward = rew
         penalty = 0
-        success_threshold = 0.5
+        success_threshold = 0.05
     elif task_id == 44:
         rew = - low_dim_state[4] + very_start[4]
         gt_reward = -np.abs(rew - 0.08) + 0.08
