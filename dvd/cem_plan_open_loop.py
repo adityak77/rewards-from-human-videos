@@ -15,7 +15,7 @@ import logging
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward, dvd_process_encode_batch
-from optimizer_utils import reward_push_mug_right_to_left, reward_push_mug_forward, reward_close_drawer, tabletop_obs, get_success_values
+from optimizer_utils import reward_push_mug_right_to_left, reward_push_mug_forward, reward_close_drawer, reward_turn_faucet_left_to_right, tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,8 @@ if __name__ == '__main__':
             terminal_reward_fn = reward_push_mug_forward
         elif args.task_id == 5:
             terminal_reward_fn = reward_close_drawer
+        elif args.task_id == 93:
+            terminal_reward_fn = reward_turn_faucet_left_to_right
     elif args.dvd:
         assert args.demo_path is not None
         if args.demo_path.startswith('demos'):

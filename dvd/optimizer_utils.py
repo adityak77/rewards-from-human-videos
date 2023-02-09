@@ -368,6 +368,16 @@ def reward_close_drawer(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
+def reward_turn_faucet_left_to_right(state, action, **kwargs):
+    '''
+    task 93: move something left to right
+    '''
+    move_faucet = -state[12]
+
+    reward = move_faucet
+
+    return torch.Tensor([reward]).to(torch.float32)
+
 def tabletop_obs(info):
     '''
     Convert env_info outputs from env.step() function into state
@@ -394,6 +404,11 @@ def get_success_values(task_id, low_dim_state, very_start):
         gt_reward = low_dim_state[10]
         penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
         success_threshold = -0.01
+    elif task_id == 93:
+        rew = -low_dim_state[12]
+        gt_reward = rew
+        penalty = 0
+        success_threshold = 0.5
 
     gt_reward += penalty
     succ = gt_reward > success_threshold
