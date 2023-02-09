@@ -383,7 +383,7 @@ def reward_push_mug_close(state, action, **kwargs):
     task 44: pushing mug close to camera
     '''
     very_start = kwargs['very_start']
-    reward = np.abs(state[4] - very_start[4] + 0.08) + 0.08
+    reward = -np.abs(-state[4] + very_start[4] - 0.08) + 0.08
 
     return torch.Tensor([reward]).to(torch.float32)
 
@@ -398,15 +398,15 @@ def tabletop_obs(info):
     return init_low_dim
 
 def get_engineered_reward(task_id):
-    if args.task_id == 94:
+    if task_id == 94:
         terminal_reward_fn = reward_push_mug_right_to_left
-    elif args.task_id == 41:
+    elif task_id == 41:
         terminal_reward_fn = reward_push_mug_away
-    elif args.task_id == 5:
+    elif task_id == 5:
         terminal_reward_fn = reward_close_drawer
-    elif args.task_id == 93:
+    elif task_id == 93:
         terminal_reward_fn = reward_turn_faucet_left_to_right
-    elif args.task_id == 44:
+    elif task_id == 44:
         terminal_reward_fn = reward_push_mug_close
 
     return terminal_reward_fn
@@ -433,10 +433,10 @@ def get_success_values(task_id, low_dim_state, very_start):
         penalty = 0
         success_threshold = 0.5
     elif task_id == 44:
-        rew = low_dim_state[4] - very_start[4]
-        gt_reward = -np.abs(rew + 0.08) - 0.08
-        penalty = 0  # if (np.abs(low_dim_state[3] - very_start[3]) < 0.05) else -100
-        success_threshold = 0.03
+        rew = - low_dim_state[4] + very_start[4]
+        gt_reward = -np.abs(rew - 0.08) + 0.08
+        penalty = 0 
+        success_threshold = 0.04
 
     gt_reward += penalty
     succ = gt_reward > success_threshold
