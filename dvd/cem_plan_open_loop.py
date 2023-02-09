@@ -14,7 +14,7 @@ import logging
 
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
-from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
+from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward, dvd_process_encode_batch
 from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
@@ -101,6 +101,9 @@ if __name__ == '__main__':
         else:
             demos = [decode_gif(args.demo_path)]
 
+        if args.dvd:
+            demo_feats = [dvd_process_encode_batch(np.array([demo]), video_encoder) for demo in demos]
+
     # initialization
     actions_mean = torch.zeros(TIMESTEPS * nu)
     actions_cov = torch.eye(TIMESTEPS * nu)
@@ -140,7 +143,7 @@ if __name__ == '__main__':
         sample_rewards = torch.zeros(N_SAMPLES)
 
         if args.dvd or args.vip:
-            states = np.zeros((N_SAMPLES, TIMESTEPS, 120, 180, 3))
+            states = np.zeros((N_SAMPLES, TIMESTEPS, 128, 128, 3))
 
         for i in range(N_SAMPLES):
             env_copy = copy.deepcopy(env)
@@ -154,8 +157,10 @@ if __name__ == '__main__':
                 curr_state = tabletop_obs(env_copy_info)
                 sample_rewards[i] = terminal_reward_fn(curr_state, u, very_start=very_start)
 
-        if args.dvd or args.vip:
-            sample_rewards = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+        if args.dvd:
+            sample_rewards = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+        elif args.vip:
+            sample_rewards = terminal_reward_fn(states, _, demos=demos)
 
         # update elites
         _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
@@ -170,7 +175,7 @@ if __name__ == '__main__':
         action_distribution = MultivariateNormal(actions_mean, actions_cov)
         traj_sample = action_distribution.sample((1,))
 
-        states = np.zeros((1, TIMESTEPS, 120, 180, 3))
+        states = np.zeros((1, TIMESTEPS, 128, 128, 3))
         all_low_dim_states = np.zeros((TIMESTEPS, 13))
 
         for t in range(TIMESTEPS):
@@ -182,8 +187,10 @@ if __name__ == '__main__':
 
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
-        if not args.engineered_rewards:
-            additional_reward = terminal_reward_fn(states, _, demos=demos, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+        if args.dvd:
+            additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+        elif args.vip:
+            additional_reward = terminal_reward_fn(states, _, demos=demos).item()
         else:
             additional_reward = 0 # NA
 
