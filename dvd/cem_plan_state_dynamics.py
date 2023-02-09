@@ -16,7 +16,7 @@ import logging
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward
-from optimizer_utils import reward_push_mug_left_to_right, reward_push_mug_forward, reward_close_drawer, tabletop_obs
+from optimizer_utils import reward_push_mug_right_to_left, reward_push_mug_forward, reward_close_drawer, tabletop_obs
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 from state_dynamics_model import Dataset, nn_constructor, rollout_trajectory, train #, _no_grad_trunc_normal
 
@@ -80,7 +80,7 @@ if __name__ == '__main__':
     # assigning reward functions
     if args.engineered_rewards:
         if args.task_id == 94:
-            terminal_reward_fn = reward_push_mug_left_to_right
+            terminal_reward_fn = reward_push_mug_right_to_left
         elif args.task_id == 41:
             terminal_reward_fn = reward_push_mug_forward
         elif args.task_id == 5:

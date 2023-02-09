@@ -301,7 +301,7 @@ def vip_reward_trajectory_similarity(states, actions, **kwargs):
     reward /= demo_goals_emb.shape[0]
     return -reward
 
-def reward_push_mug_left_to_right(state, action, **kwargs):
+def reward_push_mug_right_to_left(state, action, **kwargs):
     ''' 
     task 94: pushing mug right to left
     :param state: (nx) np.ndarray
