@@ -388,6 +388,18 @@ def tabletop_obs(info):
     init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
     return init_low_dim
 
+def get_engineered_reward(task_id):
+    if args.task_id == 94:
+        terminal_reward_fn = reward_push_mug_right_to_left
+    elif args.task_id == 41:
+        terminal_reward_fn = reward_push_mug_forward
+    elif args.task_id == 5:
+        terminal_reward_fn = reward_close_drawer
+    elif args.task_id == 93:
+        terminal_reward_fn = reward_turn_faucet_left_to_right
+
+    return terminal_reward_fn
+
 def get_success_values(task_id, low_dim_state, very_start):
     if task_id == 94:
         rew = low_dim_state[3] - very_start[3]
