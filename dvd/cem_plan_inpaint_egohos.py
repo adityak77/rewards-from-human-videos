@@ -38,6 +38,7 @@ parser.add_argument("--seed", type=int, default=-1, help="Random seed >= 0. If s
 parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
 # optimizer specific
+parser.add_argument("--learn_dynamics_model", action='store_true', default=False, help='Learn a dynamics model (otherwise use online sampling)')
 parser.add_argument("--engineered_rewards", action='store_true', default=False, help='Use hand engineered rewards or not')
 parser.add_argument("--dvd", action='store_true', help='Use dvd rewards')
 parser.add_argument("--vip", action='store_true', help='Use pretrained VIP embeddings for reward function')
@@ -47,6 +48,9 @@ parser.add_argument("--demo_path", type=str, default=None, help='path to demo vi
 
 # dvd model params
 parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
+parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
+parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
+parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks') # needs to exist for MultiColumn init
 parser.add_argument('--no_robot_inpaint', action='store_true', default=False, help='do not inpaint robot (for speed)')
 
 # env initialization
