@@ -444,7 +444,7 @@ def get_engineered_reward(task_id):
         terminal_reward_fn = reward_open_drawer
     elif task_id == 21:
         terminal_reward_fn = reward_mug_sideways
-    elif task_id == 48:
+    elif task_id == 47:
         terminal_reward_fn = reward_pickup_mug
 
     return terminal_reward_fn
@@ -485,7 +485,7 @@ def get_success_values(task_id, low_dim_state, very_start):
         gt_reward = -np.abs(rew - 0.72) + 0.72
         penalty = 0
         success_threshold = 0.6
-    elif task_id == 48:
+    elif task_id == 47:
         rew = low_dim_state[5] - very_start[5]
         gt_reward = -np.abs(rew - 0.1) + 0.1
         penalty = 0
