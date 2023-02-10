@@ -15,7 +15,7 @@ import logging
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward, dvd_process_encode_batch
-from optimizer_utils import reward_push_mug_right_to_left, reward_push_mug_forward, reward_close_drawer, reward_turn_faucet_left_to_right, tabletop_obs, get_success_values
+from optimizer_utils import get_engineered_reward, tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,6 @@ parser.add_argument("--demo_path", type=str, default=None, help='path to demo vi
 
 # dvd model params
 parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
-parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
-parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
-parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks') # needs to exist for MultiColumn init
 
 # env initialization
 parser.add_argument("--log_dir", type=str, default="mppi")
@@ -73,14 +70,8 @@ if __name__ == '__main__':
     assert sum([args.engineered_rewards, args.dvd, args.vip]) == 1
 
     if args.engineered_rewards:
-        if args.task_id == 94:
-            terminal_reward_fn = reward_push_mug_right_to_left
-        elif args.task_id == 41:
-            terminal_reward_fn = reward_push_mug_forward
-        elif args.task_id == 5:
-            terminal_reward_fn = reward_close_drawer
-        elif args.task_id == 93:
-            terminal_reward_fn = reward_turn_faucet_left_to_right
+        terminal_reward_fn = get_engineered_reward(args.task_id)
+
     elif args.dvd:
         assert args.demo_path is not None
         if args.demo_path.startswith('demos'):

@@ -324,7 +324,7 @@ def reward_push_mug_right_to_left(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_push_mug_forward(state, action, **kwargs):
+def reward_push_mug_away(state, action, **kwargs):
     '''
     task 41: pushing mug away from camera
     :param state: (nx) np.ndarray
@@ -368,13 +368,54 @@ def reward_close_drawer(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_turn_faucet_left_to_right(state, action, **kwargs):
+def reward_push_mug_left_to_right(state, action, **kwargs):
     '''
     task 93: move something left to right
     '''
-    move_faucet = -state[12]
+    very_start = kwargs['very_start']
+    left_to_right = -np.abs(-state[3] + very_start[3] - 0.15) + 0.15
 
-    reward = move_faucet
+    reward = left_to_right
+
+    return torch.Tensor([reward]).to(torch.float32)
+
+def reward_push_mug_close(state, action, **kwargs):
+    '''
+    task 44: pushing mug close to camera
+    '''
+    very_start = kwargs['very_start']
+    reward = -np.abs(-state[4] + very_start[4] - 0.08) + 0.08
+
+    return torch.Tensor([reward]).to(torch.float32)
+
+def reward_open_drawer(state, action, **kwargs):
+    '''
+    task 46: opening drawer
+    '''
+    very_start = kwargs['very_start']
+    right_to_left = np.abs(state[3] - very_start[3])
+    open = -state[10]
+
+    penalty = 0 if right_to_left < 0.01 else -100
+    reward = open + penalty
+
+    return torch.Tensor([reward]).to(torch.float32)
+
+def reward_mug_sideways(state, action, **kwargs):
+    '''
+    task 21: pushing mug close to camera
+    '''
+    very_start = kwargs['very_start']
+    reward = -np.abs(np.abs(state[8] - very_start[8]) - 0.72) + 0.72
+
+    return torch.Tensor([reward]).to(torch.float32)
+
+def reward_pickup_mug(state, action, **kwargs):
+    '''
+    Task 48: picking up mug
+    '''
+    very_start = kwargs['very_start']
+    reward = -np.abs(state[5] - very_start[5] - 0.1) + 0.1
 
     return torch.Tensor([reward]).to(torch.float32)
 
@@ -387,6 +428,26 @@ def tabletop_obs(info):
     mug_quat = np.array([info['mug_quat_x'], info['mug_quat_y'], info['mug_quat_z'], info['mug_quat_w']])
     init_low_dim = np.concatenate([hand, mug, mug_quat, [info['drawer']], [info['coffee_machine']], [info['faucet']]])
     return init_low_dim
+
+def get_engineered_reward(task_id):
+    if task_id == 94:
+        terminal_reward_fn = reward_push_mug_right_to_left
+    elif task_id == 41:
+        terminal_reward_fn = reward_push_mug_away
+    elif task_id == 5:
+        terminal_reward_fn = reward_close_drawer
+    elif task_id == 93:
+        terminal_reward_fn = reward_push_mug_left_to_right
+    elif task_id == 44:
+        terminal_reward_fn = reward_push_mug_close
+    elif task_id == 46:
+        terminal_reward_fn = reward_open_drawer
+    elif task_id == 21:
+        terminal_reward_fn = reward_mug_sideways
+    elif task_id == 47:
+        terminal_reward_fn = reward_pickup_mug
+
+    return terminal_reward_fn
 
 def get_success_values(task_id, low_dim_state, very_start):
     if task_id == 94:
@@ -405,10 +466,30 @@ def get_success_values(task_id, low_dim_state, very_start):
         penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
         success_threshold = -0.01
     elif task_id == 93:
-        rew = -low_dim_state[12]
+        rew = -low_dim_state[3] + very_start[3]
         gt_reward = rew
         penalty = 0
-        success_threshold = 0.5
+        success_threshold = 0.05
+    elif task_id == 44:
+        rew = - low_dim_state[4] + very_start[4]
+        gt_reward = -np.abs(rew - 0.08) + 0.08
+        penalty = 0 
+        success_threshold = 0.04
+    elif task_id == 46:
+        rew = -low_dim_state[10]
+        gt_reward = -low_dim_state[10]
+        penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
+        success_threshold = 0.10
+    elif task_id == 21:
+        rew = np.abs(low_dim_state[8] - very_start[8])
+        gt_reward = -np.abs(rew - 0.72) + 0.72
+        penalty = 0
+        success_threshold = 0.6
+    elif task_id == 47:
+        rew = low_dim_state[5] - very_start[5]
+        gt_reward = -np.abs(rew - 0.1) + 0.1
+        penalty = 0
+        success_threshold = 0.05
 
     gt_reward += penalty
     succ = gt_reward > success_threshold

@@ -18,7 +18,7 @@ import logging
 from sim_env.tabletop import Tabletop
 from optimizer_utils import CemLogger, decode_gif, set_all_seeds
 from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward, dvd_process_encode_batch
-from optimizer_utils import reward_push_mug_right_to_left, reward_push_mug_forward, reward_close_drawer, tabletop_obs, get_success_values
+from optimizer_utils import get_engineered_reward, tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 
 from inpaint_utils import get_human_cfg, get_robot_cfg, get_segmentation_model, get_inpaint_model, inpaint, get_segmentation_model_egohos, inpaint_egohos
@@ -38,7 +38,6 @@ parser.add_argument("--seed", type=int, default=-1, help="Random seed >= 0. If s
 parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
 # optimizer specific
-parser.add_argument("--learn_dynamics_model", action='store_true', default=False, help='Learn a dynamics model (otherwise use online sampling)')
 parser.add_argument("--engineered_rewards", action='store_true', default=False, help='Use hand engineered rewards or not')
 parser.add_argument("--dvd", action='store_true', help='Use dvd rewards')
 parser.add_argument("--vip", action='store_true', help='Use pretrained VIP embeddings for reward function')
@@ -48,9 +47,6 @@ parser.add_argument("--demo_path", type=str, default=None, help='path to demo vi
 
 # dvd model params
 parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
-parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
-parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
-parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks') # needs to exist for MultiColumn init
 parser.add_argument('--no_robot_inpaint', action='store_true', default=False, help='do not inpaint robot (for speed)')
 
 # env initialization
@@ -99,12 +95,8 @@ if __name__ == '__main__':
     inpaint_model = get_inpaint_model(args)
 
     if args.engineered_rewards:
-        if args.task_id == 94:
-            terminal_reward_fn = reward_push_mug_right_to_left
-        elif args.task_id == 41:
-            terminal_reward_fn = reward_push_mug_forward
-        elif args.task_id == 5:
-            terminal_reward_fn = reward_close_drawer
+        terminal_reward_fn = get_engineered_reward(args.task_id)
+
     elif args.dvd:
         assert args.demo_path is not None
         if args.demo_path.startswith('demos'):
