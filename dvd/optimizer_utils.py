@@ -401,15 +401,6 @@ def reward_open_drawer(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_mug_sideways(state, action, **kwargs):
-    '''
-    task 21: pushing mug close to camera
-    '''
-    very_start = kwargs['very_start']
-    reward = -np.abs(np.abs(state[8] - very_start[8]) - 0.72) + 0.72
-
-    return torch.Tensor([reward]).to(torch.float32)
-
 def reward_pickup_mug(state, action, **kwargs):
     '''
     Task 48: picking up mug
@@ -442,8 +433,6 @@ def get_engineered_reward(task_id):
         terminal_reward_fn = reward_push_mug_close
     elif task_id == 46:
         terminal_reward_fn = reward_open_drawer
-    elif task_id == 21:
-        terminal_reward_fn = reward_mug_sideways
     elif task_id == 47:
         terminal_reward_fn = reward_pickup_mug
     elif task_id == 10 or task_id == 27: # qualitative tasks
@@ -482,11 +471,6 @@ def get_success_values(task_id, low_dim_state, very_start):
         gt_reward = -low_dim_state[10]
         penalty = 0 if (np.abs(low_dim_state[3] - very_start[3]) < 0.01) else -100
         success_threshold = 0.10
-    elif task_id == 21:
-        rew = np.abs(low_dim_state[8] - very_start[8])
-        gt_reward = -np.abs(rew - 0.72) + 0.72
-        penalty = 0
-        success_threshold = 0.6
     elif task_id == 47:
         rew = low_dim_state[5] - very_start[5]
         gt_reward = -np.abs(rew - 0.1) + 0.1
