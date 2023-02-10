@@ -446,6 +446,8 @@ def get_engineered_reward(task_id):
         terminal_reward_fn = reward_mug_sideways
     elif task_id == 47:
         terminal_reward_fn = reward_pickup_mug
+    elif task_id == 10 or task_id == 27: # qualitative tasks
+        terminal_reward_fn = lambda state, action, **kwargs: torch.Tensor([0]).to(torch.float32)
 
     return terminal_reward_fn
 
@@ -490,6 +492,11 @@ def get_success_values(task_id, low_dim_state, very_start):
         gt_reward = -np.abs(rew - 0.1) + 0.1
         penalty = 0
         success_threshold = 0.05
+    elif task_id == 10 or task_id == 27: # qualitative tasks
+        rew = 0
+        gt_reward = 0
+        penalty = 0
+        success_threshold = 0
 
     gt_reward += penalty
     succ = gt_reward > success_threshold
