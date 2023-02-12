@@ -147,6 +147,7 @@ def load_encoder_model(args):
 
     return model.to(device)
 
+@torch.no_grad()
 def dvd_reward(states, actions, **kwargs):
     """
     :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
@@ -160,22 +161,20 @@ def dvd_reward(states, actions, **kwargs):
     video_encoder = kwargs['video_encoder']
     sim_discriminator = kwargs['sim_discriminator']
     
-    rewards_demo = torch.zeros(states.shape[0], device=device)
+    rewards_demo = torch.zeros(states.shape[0])
     states = (states * 255).astype(np.uint8)
     states_feats = dvd_process_encode_batch(states, video_encoder)
     
     sim_discriminator.eval()
-    with torch.no_grad():
-        for demo_feat in demo_feats:
-            rewards_list = []
-            for state_feat in states_feats:
-                logits = sim_discriminator.forward(state_feat.unsqueeze(0), demo_feat)
-                reward_samples = F.softmax(logits, dim=1)
-                rewards_list.append(reward_samples[:, 1])
+    for demo_feat in demo_feats:
+        logits = sim_discriminator.forward(states_feats, demo_feat.repeat(states_feats.shape[0], 1))
+        reward_samples = F.softmax(logits, dim=1)
 
-            rewards_demo += torch.cat(rewards_list, dim=0)
+        rewards_demo += reward_samples[:, 1].cpu()
+
     rewards = rewards_demo / len(demo_feats)
 
+    torch.cuda.empty_cache()
     return rewards
 
 def dvd_process_encode_batch(samples, video_encoder):
