@@ -112,8 +112,6 @@ if __name__ == '__main__':
     elif args.vip:
         logdir = 'vip2'
 
-    logdir += '_' + args.demo_path.split('/')[-1]
-    
     logdir = logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
     logdir = os.path.join('cem_plots', logdir)
     run = 0
