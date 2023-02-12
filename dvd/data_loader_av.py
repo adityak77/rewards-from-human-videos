@@ -180,6 +180,6 @@ class VideoFolder(torch.utils.data.Dataset):
 
     def __len__(self):
         self.total_files = len(self.json_data)
-        if self.similarity and not self.is_val:
+        if self.similarity and not self.is_val and self.num_tasks <= 12:
             self.total_files = self.batch_size * 200 
         return self.total_files
