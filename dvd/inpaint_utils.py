@@ -6,6 +6,8 @@ import time
 import numpy as np
 import cv2
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision import transforms as T
 from skimage.io import imsave
 
@@ -22,7 +24,25 @@ from core.utils import to_tensors
 sys.path.append('/home/akannan2/inpainting/EgoHOS/mmsegmentation/')
 from mmseg.apis import inference_segmentor, init_segmentor
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def ddp_setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+
+def ddp_cleanup():
+    dist.destroy_process_group()
+
+def convert_to_ddp_model(model, rank, is_detectron_model=False):
+    if is_detectron_model:
+        model.model = DDP(model.model, device_ids=[rank])
+        return model
+    else:
+        ddp_model = DDP(model, device_ids=[rank])
+        return ddp_model
 
 def get_human_cfg():
     config_file = '/home/akannan2/inpainting/detectron2/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml'
@@ -53,13 +73,18 @@ def get_robot_cfg():
     return cfg
 
 
-def get_segmentation_model(cfg):
+def get_segmentation_model(cfg, rank):
+    if rank is not None:
+        cfg.MODEL.DEVICE = f'cuda:{rank}'
     predictor = DefaultPredictor(cfg)
     return predictor
 
-def get_inpaint_model(args):
+def get_inpaint_model(args, rank=None):
     # set up models
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if rank is not None:
+        device = torch.device(f'cuda:{rank}')
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     net = importlib.import_module('model.' + args.model)
     model = net.InpaintGenerator().to(device)
@@ -160,8 +185,37 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     
     return frames, masks
 
-def inpaint(args, inpaint_model, segment_model, video_frames):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def inpaint_wrapper(rank, args, inpaint_models, segment_models, states):
+    chunksize = states.shape[0] // args.num_gpus
+    start = chunksize * rank
+    if rank == args.num_gpus - 1:
+        end = states.shape[0]
+    else:
+        end = start + chunksize
+    
+    inpainted_states = []
+    for i in tqdm(range(start, end)):
+        res = inpaint(args, inpaint_models[rank], segment_models[rank], states[i], rank)
+        inpainted_states.append((i, res))
+
+    return inpainted_states
+
+def inpaint(args, inpaint_model, segment_model, video_frames, rank=None):
+    # ddp_setup(rank, world_size)
+
+    # robot_cfg = get_robot_cfg()
+    # segment_model = get_segmentation_model(robot_cfg, rank)
+
+    # device = torch.device(f"cuda:{rank}")
+    # inpaint_model = inpaint_model.to(device)
+
+    # inpaint_model = convert_to_ddp_model(inpaint_model, rank)
+    # segment_model = convert_to_ddp_model(segment_model, rank, is_detectron_model=True)
+
+    if rank is not None:
+        device = torch.device(f"cuda:{rank}")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if args.model == "e2fgvi":
         size = (432, 240)
@@ -233,7 +287,12 @@ def inpaint(args, inpaint_model, segment_model, video_frames):
 
 
 """         EGOHOS functions below         """
-def get_segmentation_model_egohos():
+def get_segmentation_model_egohos(rank=None):
+    if rank is not None:
+        device = torch.device(f"cuda:{rank}")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     config_file = '/home/akannan2/inpainting/EgoHOS/mmsegmentation/work_dirs/seg_twohands_ccda/seg_twohands_ccda.py'
     checkpoint_file = '/home/akannan2/inpainting/EgoHOS/mmsegmentation/work_dirs/seg_twohands_ccda/best_mIoU_iter_56000.pth'
     model = init_segmentor(config_file, checkpoint_file, device=device)
@@ -278,8 +337,11 @@ def segment_video(reader, model, video_path, catchBadMasks=False):
 
     return frames, masks
 
-def inpaint_egohos(args, inpaint_model, segment_model, video_frames):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def inpaint_egohos(args, inpaint_model, segment_model, video_frames, rank=None):
+    if rank is not None:
+        device = torch.device(f"cuda:{rank}")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if args.model == "e2fgvi":
         size = (432, 240)
