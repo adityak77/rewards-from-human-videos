@@ -236,9 +236,7 @@ def run_cem(args, conf):
                     with mp.Pool(processes=args.num_gpus) as p:
                         inpainted_states = p.starmap(inpaint_wrapper, [(rank, args, inpaint_models, robot_segmentation_models, states) for rank in range(args.num_gpus)])
                     
-                    # flatten list of lists
-                    obs_sampled = [item for sublist in inpainted_states for item in sublist]
-                    obs_sampled = np.array(list(zip(*sorted(obs_sampled)))[1])
+                    obs_sampled = np.concatenate(obs_sampled, axis=0)
 
                     # convert back to RGB
                     for i in range(len(obs_sampled)):

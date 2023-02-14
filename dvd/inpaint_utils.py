@@ -196,22 +196,11 @@ def inpaint_wrapper(rank, args, inpaint_models, segment_models, states):
     inpainted_states = []
     for i in tqdm(range(start, end)):
         res = inpaint(args, inpaint_models[rank], segment_models[rank], states[i], rank)
-        inpainted_states.append((i, res))
+        inpainted_states.append(res)
 
-    return inpainted_states
+    return np.array(inpainted_states)
 
 def inpaint(args, inpaint_model, segment_model, video_frames, rank=None):
-    # ddp_setup(rank, world_size)
-
-    # robot_cfg = get_robot_cfg()
-    # segment_model = get_segmentation_model(robot_cfg, rank)
-
-    # device = torch.device(f"cuda:{rank}")
-    # inpaint_model = inpaint_model.to(device)
-
-    # inpaint_model = convert_to_ddp_model(inpaint_model, rank)
-    # segment_model = convert_to_ddp_model(segment_model, rank, is_detectron_model=True)
-
     if rank is not None:
         device = torch.device(f"cuda:{rank}")
     else:
