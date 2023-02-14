@@ -234,9 +234,9 @@ def run_cem(args, conf):
                             obs_sampled[i][j] = cv2.cvtColor(obs_sampled[i][j], cv2.COLOR_RGB2BGR)
 
                     with mp.Pool(processes=args.num_gpus) as p:
-                        inpainted_states = p.starmap(inpaint_wrapper, [(rank, args, inpaint_models, robot_segmentation_models, states) for rank in range(args.num_gpus)])
+                        inpainted_states = p.starmap(inpaint_wrapper, [(rank, args, inpaint_models, robot_segmentation_models, obs_sampled) for rank in range(args.num_gpus)])
                     
-                    obs_sampled = np.concatenate(obs_sampled, axis=0)
+                    obs_sampled = np.concatenate(inpainted_states, axis=0)
 
                     # convert back to RGB
                     for i in range(len(obs_sampled)):
