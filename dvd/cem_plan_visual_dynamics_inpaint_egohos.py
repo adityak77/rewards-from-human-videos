@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from torch import nn as nn
 import torch
+import torch.multiprocessing as mp
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
 from tqdm import tqdm
@@ -22,7 +23,7 @@ from optimizer_utils import tabletop_obs, get_success_values
 # from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
 from visual_dynamics_model import load_world_model, rollout_trajectory
 
-from inpaint_utils import get_human_cfg, get_robot_cfg, get_segmentation_model, get_inpaint_model, inpaint, get_segmentation_model_egohos, inpaint_egohos
+from inpaint_utils import get_human_cfg, get_robot_cfg, get_segmentation_model, get_inpaint_model, inpaint, inpaint_wrapper, get_segmentation_model_egohos, inpaint_egohos
 
 from distutils.util import strtobool
 
@@ -36,9 +37,6 @@ logging.basicConfig(level=logging.DEBUG,
                     datefmt='%m-%d %H:%M:%S')
 logging.getLogger('matplotlib.font_manager').disabled = True
 logging.getLogger('PIL').disabled = True
-
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_args_conf():
     parser = argparse.ArgumentParser()
@@ -107,9 +105,7 @@ def get_args_conf():
     return args, conf
 
 
-if __name__ == '__main__':
-    args, conf = get_args_conf()
-
+def run_cem(args, conf):
     TIMESTEPS = 51 # MPC lookahead - max length of episode
     N_SAMPLES = 100
     NUM_ELITES = 7
@@ -132,8 +128,8 @@ if __name__ == '__main__':
     # load in models
     robot_cfg = get_robot_cfg()
     human_segmentation_model = get_segmentation_model_egohos()
-    robot_segmentation_model = get_segmentation_model(robot_cfg)
-    inpaint_model = get_inpaint_model(args)
+    robot_segmentation_models = [get_segmentation_model(robot_cfg, rank) for rank in range(args.num_gpus)]
+    inpaint_models = [get_inpaint_model(args, rank) for rank in range(args.num_gpus)]
 
     # assigning reward functions
     if args.dvd:
@@ -161,7 +157,7 @@ if __name__ == '__main__':
         demos = [decode_gif(args.demo_path)]
 
     # Inpaint demos here (and maintain same formatting)
-    demos = [inpaint_egohos(args, inpaint_model, human_segmentation_model, demo) for demo in demos]
+    demos = [inpaint_egohos(args, inpaint_models[0], human_segmentation_model, demo) for demo in demos]
 
     if args.dvd:
         demo_feats = [dvd_process_encode_batch(np.array([demo]), video_encoder) for demo in demos]
@@ -237,10 +233,12 @@ if __name__ == '__main__':
                         for j in range(len(obs_sampled[i])):
                             obs_sampled[i][j] = cv2.cvtColor(obs_sampled[i][j], cv2.COLOR_RGB2BGR)
 
-                    inpainted_states = []
-                    for sample in tqdm(obs_sampled):
-                        inpainted_states.append(inpaint(args, inpaint_model, robot_segmentation_model, sample))
-                    obs_sampled = np.array(inpainted_states)
+                    with mp.Pool(processes=args.num_gpus) as p:
+                        inpainted_states = p.starmap(inpaint_wrapper, [(rank, args, inpaint_models, robot_segmentation_models, states) for rank in range(args.num_gpus)])
+                    
+                    # flatten list of lists
+                    obs_sampled = [item for sublist in inpainted_states for item in sublist]
+                    obs_sampled = np.array(list(zip(*sorted(obs_sampled)))[1])
 
                     # convert back to RGB
                     for i in range(len(obs_sampled)):
@@ -285,7 +283,7 @@ if __name__ == '__main__':
                 for j in range(len(inpaint_states[i])):
                     inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_RGB2BGR)
 
-            inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
+            inpaint_states = np.array([inpaint(args, inpaint_models[0], robot_segmentation_models[0], inpaint_states[0])])
 
             # convert back to RGB
             for i in range(len(inpaint_states)):
@@ -331,3 +329,12 @@ if __name__ == '__main__':
 
         with open(os.path.join(cem_logger.logdir, 'results.pkl'), 'wb') as f:
             pickle.dump(res_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+def main():
+    mp.set_start_method('spawn')
+    args, conf = get_args_conf()
+    args.num_gpus = len(list(map(int, os.environ['CUDA_VISIBLE_DEVICES'].split(','))))
+    run_cem(args, conf)
+
+if __name__ == '__main__':
+    main()
