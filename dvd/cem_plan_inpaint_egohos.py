@@ -95,8 +95,6 @@ def run_cem(args):
     robot_cfg = get_robot_cfg()
     human_segmentation_model = get_segmentation_model_egohos()
     inpaint_model = get_inpaint_model(args)
-    # robot_segmentation_models = [get_segmentation_model(robot_cfg, rank) for rank in range(args.num_gpus)]
-    # inpaint_models = [get_inpaint_model(args, rank) for rank in range(args.num_gpus)]
 
     if args.engineered_rewards:
         terminal_reward_fn = get_engineered_reward(args.task_id)
