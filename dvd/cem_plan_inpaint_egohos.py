@@ -238,34 +238,8 @@ def run_cem(args):
             all_low_dim_states[t] = tabletop_obs(low_dim_info)
         tend = time.perf_counter()
 
-
-        # inpainted executed trajectory
-        # if args.dvd or args.vip:
-        #     # Inpaint states here
-        #     inpaint_states = (states * 255).astype(np.uint8)
-
-        #     if not args.no_robot_inpaint:
-        #         # detectron2 input is BGR
-        #         for i in range(len(inpaint_states)):
-        #             for j in range(len(inpaint_states[i])):
-        #                 inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_RGB2BGR)
-
-        #         inpaint_states = np.array([inpaint(args, inpaint_models[0], robot_segmentation_models[0], inpaint_states[0])])
-
-        #         # convert back to RGB
-        #         for i in range(len(inpaint_states)):
-        #             for j in range(len(inpaint_states[i])):
-        #                 inpaint_states[i][j] = cv2.cvtColor(inpaint_states[i][j], cv2.COLOR_BGR2RGB)
-
-
         # ALL CODE BELOW for logging sampled trajectory
         additional_reward_type = 'vip' if args.vip else 'dvd'
-        # if args.dvd:
-        #     additional_reward = terminal_reward_fn(inpaint_states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
-        # elif args.vip:
-        #     additional_reward = terminal_reward_fn(inpaint_states, _, demos=demos).item()
-        # else:
-        #     additional_reward = 0 # NA
         additional_reward = 0
 
         # calculate success and reward of trajectory
