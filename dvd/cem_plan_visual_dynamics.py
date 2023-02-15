@@ -7,24 +7,19 @@ from torch import nn as nn
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
-import imageio
-import pickle
-
-import argparse
 import logging
 
 from sim_env.tabletop import Tabletop
-from optimizer_utils import CemLogger, decode_gif, set_all_seeds
-from optimizer_utils import load_discriminator_model, load_encoder_model, dvd_reward, dvd_process_encode_batch
-from optimizer_utils import tabletop_obs, get_success_values
-# from optimizer_utils import vip_reward, vip_reward_trajectory_similarity
+
+from optimizer_utils import (get_cem_args_conf, 
+                             initialize_cem, 
+                             initialize_logger, 
+                             cem_iteration_logging, 
+                             decode_gif, 
+                             dvd_process_encode_batch, 
+                             tabletop_obs
+                            )
 from visual_dynamics_model import load_world_model, rollout_trajectory
-
-from distutils.util import strtobool
-
-import sys
-sys.path.append('/home/akannan2/rewards-from-human-videos/pydreamer')
-from pydreamer import tools
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG,
@@ -33,100 +28,20 @@ logging.basicConfig(level=logging.DEBUG,
 logging.getLogger('matplotlib.font_manager').disabled = True
 logging.getLogger('PIL').disabled = True
 
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-def get_args_conf():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--task_id", type=int, required=True, help="Task to learn a model for")
-    parser.add_argument("--seed", type=int, default=-1, help="Random seed >= 0. If seed < 0, then use random seed")
-    parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
-
-    # learned visual dynamics model
-    parser.add_argument("--configs", nargs='+', required=True)
-    parser.add_argument("--saved_model_path", type=str, required=True)
-
-    # optimizer specific
-    parser.add_argument("--dvd", action='store_true', help='Use dvd rewards')
-    parser.add_argument("--vip", action='store_true', help='Use pretrained VIP embeddings for reward function')
-
-    # for DVD or VIP rewards
-    parser.add_argument("--demo_path", type=str, default=None, help='path to demo video')
-
-    # dvd model params
-    parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
-    parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
-    parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
-    parser.add_argument('--num_tasks', type=int, default=2, help='number of tasks') # needs to exist for MultiColumn init
-
-    # env initialization
-    parser.add_argument("--log_dir", type=str, default="mppi")
-    parser.add_argument("--env_log_freq", type=int, default=20) 
-    parser.add_argument("--verbose", type=bool, default=1) 
-    parser.add_argument("--xml", type=str, default='env1')
-
-    args, remaining = parser.parse_known_args()
-
-    # Config from YAML
-    conf = {}
-    configs = tools.read_yamls('../pydreamer/config')
-    for name in args.configs:
-        if ',' in name:
-            for n in name.split(','):
-                conf.update(configs[n])
-        else:
-            conf.update(configs[name])
-
-    # Override config from command-line
-    parser = argparse.ArgumentParser()
-    for key, value in conf.items():
-        type_ = type(value) if value is not None else str
-        if type_ == bool:
-            type_ = lambda x: bool(strtobool(x))
-        parser.add_argument(f'--{key}', type=type_, default=value)
-    conf = parser.parse_args(remaining)
-
-    return args, conf
-
-
-if __name__ == '__main__':
-    args, conf = get_args_conf()
-
+def run_cem(args, conf):
     TIMESTEPS = 51 # MPC lookahead - max length of episode
     N_SAMPLES = 100
     NUM_ELITES = 7
     NUM_ITERATIONS = args.num_iter
     nu = 4
     nx = 13
-
     closed_loop_frequency = 10
-
-    dtype = torch.double
-
-    # set random seed
-    if args.seed >= 0:
-        set_all_seeds(args.seed)
-        print(f"Using seed: {args.seed}")
 
     # only one of these reward functions allowed per run
     assert sum([args.dvd, args.vip]) == 1
+    video_encoder, sim_discriminator, terminal_reward_fn = initialize_cem(args)
 
-    # assigning reward functions
-    if args.dvd:
-        assert args.demo_path is not None
-        if args.demo_path.startswith('demos'):
-            assert args.demo_path.endswith(str(args.task_id))
-        video_encoder = load_encoder_model(args)
-        sim_discriminator = load_discriminator_model(args)
-        terminal_reward_fn = dvd_reward
-    elif args.vip:
-        assert args.demo_path is not None
-        if args.demo_path.startswith('demos'):
-            assert args.demo_path.endswith(str(args.task_id))
-        video_encoder = None
-        sim_discriminator = None
-        terminal_reward_fn = vip_reward
-
+    # load in models
     world_model = load_world_model(conf, args.saved_model_path)
 
     # reading demos
@@ -144,19 +59,7 @@ if __name__ == '__main__':
     actions_cov = torch.eye(TIMESTEPS * nu)
 
     # for logging
-    if args.dvd:
-        logdir = args.checkpoint.split('/')[1]
-    elif args.vip:
-        logdir = 'vip'
-    
-    logdir = 'visual_dynamics_' + logdir + f'_{TIMESTEPS}_{N_SAMPLES}_{NUM_ITERATIONS}_task{args.task_id}'
-    logdir = os.path.join('cem_plots', logdir)
-    run = 0
-    while os.path.isdir(logdir + f'_run{run}'):
-        run += 1
-    logdir = logdir + f'_run{run}'
-    
-    cem_logger = CemLogger(logdir)
+    cem_logger = initialize_logger(args, TIMESTEPS, N_SAMPLES, NUM_ITERATIONS, prefix='visual_dynamics_')
     for ep in range(NUM_ITERATIONS):
         # env initialization
         env = Tabletop(log_freq=args.env_log_freq, 
@@ -220,44 +123,22 @@ if __name__ == '__main__':
             actions[t, :] = action
 
         tend = time.perf_counter()
+        ep_time = tend - tstart
         # switch back to [0-1] format
         states[0] += 0.5
 
-        # ALL CODE BELOW for logging sampled trajectory
-        additional_reward_type = 'vip' if args.vip else 'dvd'
+        # logging sampled trajectory
         if args.dvd:
-            additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
-        elif args.vip:
-            additional_reward = terminal_reward_fn(states, _, demos=demos).item()
+            cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, 
+                                  sample_rewards, calculate_add_reward=True, terminal_reward_fn=terminal_reward_fn, 
+                                  demos=demos)
+        if args.vip:
+            cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, 
+                                  sample_rewards, calculate_add_reward=True, terminal_reward_fn=terminal_reward_fn, 
+                                  video_encoder=video_encoder, sim_discriminator=sim_discriminator, 
+                                  demo_feats=demo_feats)
         
-        # calculate success and reward of trajectory
-        any_timestep_succ = False
-        for t in range(TIMESTEPS):
-            low_dim_state = all_low_dim_states[t]
-            _, gt_reward, succ = get_success_values(args.task_id, low_dim_state, very_start)
-            
-            any_timestep_succ = any_timestep_succ or succ
 
-        low_dim_state = tabletop_obs(low_dim_info)
-        rew, gt_reward, succ = get_success_values(args.task_id, low_dim_state, very_start)
-
-        mean_sampled_rewards = sample_rewards.cpu().numpy().mean()
-
-        logger.debug(f"{ep}: Trajectory time: {tend-tstart:.4f}\t Object Position Shift: {rew:.6f}")
-        cem_logger.update(gt_reward, succ, any_timestep_succ, mean_sampled_rewards, additional_reward, additional_reward_type)
-
-        # logging results
-        all_obs = (states[0] * 255).astype(np.uint8)
-        cem_logger.save_graphs(all_obs)
-
-        res_dict = {
-            'total_iterations': cem_logger.total_iterations,
-            'total_last_success': cem_logger.total_last_success,
-            'total_any_timestep_success': cem_logger.total_any_timestep_success,
-            'succ_rate_history': cem_logger.succ_rate_history,
-            'gt_reward_history': cem_logger.gt_reward_history,
-            'seed': args.seed,
-        }
-
-        with open(os.path.join(cem_logger.logdir, 'results.pkl'), 'wb') as f:
-            pickle.dump(res_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+if __name__ == '__main__':
+    args, conf = get_cem_args_conf()
+    run_cem(args, conf)
