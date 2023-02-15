@@ -6,8 +6,6 @@ import time
 import numpy as np
 import cv2
 import torch
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision import transforms as T
 from skimage.io import imsave
 
@@ -23,26 +21,6 @@ from core.utils import to_tensors
 
 sys.path.append('/home/akannan2/inpainting/EgoHOS/mmsegmentation/')
 from mmseg.apis import inference_segmentor, init_segmentor
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-def ddp_setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-
-    # initialize the process group
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
-
-def ddp_cleanup():
-    dist.destroy_process_group()
-
-def convert_to_ddp_model(model, rank, is_detectron_model=False):
-    if is_detectron_model:
-        model.model = DDP(model.model, device_ids=[rank])
-        return model
-    else:
-        ddp_model = DDP(model, device_ids=[rank])
-        return ddp_model
 
 def get_human_cfg():
     config_file = '/home/akannan2/inpainting/detectron2/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml'
@@ -185,7 +163,7 @@ def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     
     return frames, masks
 
-def inpaint_wrapper(rank, args, inpaint_models, segment_models, states):
+def inpaint_wrapper(args, states, cfg, rank):
     chunksize = states.shape[0] // args.num_gpus
     start = chunksize * rank
     if rank == args.num_gpus - 1:
@@ -193,9 +171,11 @@ def inpaint_wrapper(rank, args, inpaint_models, segment_models, states):
     else:
         end = start + chunksize
     
+    inpaint_model = get_inpaint_model(args, rank)
+    segment_model = get_segmentation_model(cfg, rank)
     inpainted_states = []
     for i in tqdm(range(start, end)):
-        res = inpaint(args, inpaint_models[rank], segment_models[rank], states[i], rank)
+        res = inpaint(args, inpaint_model, segment_model, states[i], rank)
         inpainted_states.append(res)
 
     return np.array(inpainted_states)
