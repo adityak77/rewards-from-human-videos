@@ -54,9 +54,6 @@ class CemLogger():
 
         self._display_iteration_result(gt_reward, last_succ, any_timestep_succ, additional_reward_type, additional_reward)
 
-        # if len(self.rolling_last_success) > 10:
-        #     self.rolling_last_success.popleft()
-        
         succ_rate = sum(self.rolling_any_timestep_success) / len(self.rolling_any_timestep_success)
 
         self.gt_reward_history.append(gt_reward)
