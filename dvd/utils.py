@@ -8,6 +8,7 @@ import shutil
 import glob
 import numpy as np
 import random
+import torch.distributed as dist
 
 import matplotlib
 matplotlib.use('Agg')
@@ -54,6 +55,8 @@ def load_args():
     args.json_data_val = args.root + "something-something-v2-validation.json"
     args.json_data_test = args.root + "something-something-v2-test.json"
     args.json_file_labels = args.root + "something-something-v2-labels.json"
+    args.num_gpus = torch.cuda.device_count()
+
     assert not (args.lang_template and args.lang_label), "can't use both language template and label"
     random.seed(args.seed)
     print(args)
@@ -83,9 +86,9 @@ def load_json_config(path):
 
 def setup_cuda_devices(args):
     device_ids = []
-    device = torch.device("cuda" if args.use_cuda else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        device_ids = [int(i) for i in args.gpus.split(',')]
+        device_ids = [int(i) for i in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
     return device, device_ids
 
 
@@ -113,3 +116,13 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
+
+def setup_ddp(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+def cleanup_ddp():
+    dist.destroy_process_group()

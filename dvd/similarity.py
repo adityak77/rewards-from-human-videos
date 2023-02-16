@@ -17,10 +17,7 @@ import imageio
 import pickle
 from PIL import Image
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.cuda.set_device(0)
-
-def train_similarity(args, train_loader, model, sim_discriminator, loss_class, optimizer, epoch):
+def train_similarity(args, train_loader, model, sim_discriminator, loss_class, optimizer, epoch, device):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -60,15 +57,15 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
         sim_discriminator.zero_grad()
         
         # Encode videos
-        pos_enc = model.encode(pos_data)
-        anchor_enc = model.encode(anchor_data)
-        neg_enc = model.encode(neg_data)
+        pos_enc = model.module.encode(pos_data)
+        anchor_enc = model.module.encode(anchor_data)
+        neg_enc = model.module.encode(neg_data)
         
         # Calculate loss
         pos_anchor = sim_discriminator.forward(pos_enc, anchor_enc)
         neg_anchor = sim_discriminator.forward(anchor_enc, neg_enc)
-        pos_anchor_label = torch.ones(args.batch_size).long().cuda()
-        neg_anchor_label = torch.zeros(args.batch_size).long().cuda()
+        pos_anchor_label = torch.ones(args.batch_size).long().to(device)
+        neg_anchor_label = torch.zeros(args.batch_size).long().to(device)
         class_out = torch.cat((pos_anchor, neg_anchor))  
         sim_labels = torch.cat((pos_anchor_label, neg_anchor_label))
         class_loss = loss_class(class_out, sim_labels)
@@ -108,7 +105,7 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
     return losses.avg, top1.avg, class_losses.avg, false_pos_meter.avg, false_neg_meter.avg
 
 
-def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch):
+def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch, device):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -137,18 +134,17 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
             neg_data = [neg_data.to(device)]
 
             # Encode videos
-            pos_enc = model.encode(pos_data)
-            anchor_enc = model.encode(anchor_data)
-            neg_enc = model.encode(neg_data)
+            pos_enc = model.module.encode(pos_data)
+            anchor_enc = model.module.encode(anchor_data)
+            neg_enc = model.module.encode(neg_data)
         
             # Calculate loss
             pos_anchor = sim_discriminator.forward(pos_enc, anchor_enc)
             neg_anchor = sim_discriminator.forward(anchor_enc, neg_enc)
-            pos_anchor_label = torch.ones([args.batch_size])
-            neg_anchor_label = torch.zeros([args.batch_size])
-            pos_neg_label = torch.zeros([args.batch_size])
+            pos_anchor_label = torch.ones([args.batch_size]).long().to(device)
+            neg_anchor_label = torch.zeros([args.batch_size]).long().to(device)
             class_out = torch.cat((pos_anchor, neg_anchor)) 
-            sim_labels = torch.cat((pos_anchor_label, pos_neg_label)).long().cuda()
+            sim_labels = torch.cat((pos_anchor_label, neg_anchor_label))
             class_loss = loss_class(class_out, sim_labels)
             
             enc = torch.cat((pos_enc, anchor_enc, neg_enc))
