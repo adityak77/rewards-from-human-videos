@@ -65,6 +65,11 @@ def main():
         save_dir += '_inpainted_egohos_hq'
     if args.sd_augment:
         save_dir += '_sd_augment'
+    if args.lang_template:
+        save_dir += '_lang_template'
+    if args.lang_label:
+        save_dir += '_lang_label'
+    
     print(" > Output folder for this run -- {}".format(save_dir))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)

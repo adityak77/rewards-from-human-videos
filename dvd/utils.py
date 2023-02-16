@@ -45,6 +45,8 @@ def load_args():
     parser.add_argument('--action_dim', type=int, default=5, help='action dim, only used for behavioral cloning baseline (5 for sim, 4 for widowx)')
     parser.add_argument('--inpaint', action='store_true', default=False, help='whether to train on human inpainted smth smth videos')
     parser.add_argument('--sd_augment', action='store_true', default=False, help='whether to add inpainted smth smth videos augmented with stable diffusion')
+    parser.add_argument('--lang_template', action='store_true', default=False, help='whether to use language template in loss')
+    parser.add_argument('--lang_label', action='store_true', default=False, help='whether to use language label in loss')
     
     args = parser.parse_args()
     args.im_size_x = int(args.im_size * 1.5)
@@ -52,6 +54,7 @@ def load_args():
     args.json_data_val = args.root + "something-something-v2-validation.json"
     args.json_data_test = args.root + "something-something-v2-test.json"
     args.json_file_labels = args.root + "something-something-v2-labels.json"
+    assert not (args.lang_template and args.lang_label), "can't use both language template and label"
     random.seed(args.seed)
     print(args)
     return args
