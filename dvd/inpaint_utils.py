@@ -110,24 +110,9 @@ def process_masks(masks, size = None):
 
         m = np.array(m)
         m = np.array(m > 0).astype(np.uint8)
-        # m = cv2.dilate(m,
-        #                cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
-        #                iterations=4)
         masks_expanded.append(Image.fromarray(m * 255))
 
     return masks_expanded
-
-# def process_video(model, video, resolution=None):
-#     count = 0
-#     while video.isOpened() and count < 100:
-#         success, frame = video.read()
-#         if success:
-#             count += 1
-#             if resolution:
-#                 frame = cv2.resize(frame, dsize=(512, 512), interpolation=cv2.INTER_CUBIC)
-#             yield (frame, model(frame))
-#         else:
-#             break
 
 def get_segmented_frames(video_frames, model, model_name, human_filter=False):
     resolution = None

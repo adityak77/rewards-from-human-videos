@@ -83,15 +83,6 @@ class CemLogger():
         plt.savefig(os.path.join(self.logdir, 'engineered_reward_iteration.png'))
         plt.close()
         
-        # rolling average of success rate
-        # plt.figure()
-        # plt.plot([i for i in range(len(self.succ_rate_history))], self.succ_rate_history)
-        # plt.xlabel('CEM Iteration')
-        # plt.ylabel('Rolling Success Rate')
-        # plt.title('Success Rate (average over last 10 iters)')
-        # plt.savefig(os.path.join(self.logdir, 'rolling_success_rate_iteration.png'))
-        # plt.close()
-
         # cumulative success rate
         plt.figure()
         plt.plot([i for i in range(len(self.succ_rate_history))], self.succ_rate_history)
