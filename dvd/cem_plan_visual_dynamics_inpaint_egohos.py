@@ -45,6 +45,7 @@ def run_cem(args, conf):
 
     # only dvd for inpainting
     assert args.dvd
+    assert args.configs and args.saved_model_path
     video_encoder, sim_discriminator, terminal_reward_fn = initialize_cem(args)
 
     # load in models

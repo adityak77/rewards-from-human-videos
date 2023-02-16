@@ -39,6 +39,7 @@ def run_cem(args, conf):
 
     # only one of these reward functions allowed per run
     assert sum([args.dvd, args.vip]) == 1
+    assert args.configs and args.saved_model_path
     video_encoder, sim_discriminator, terminal_reward_fn = initialize_cem(args)
 
     # load in models

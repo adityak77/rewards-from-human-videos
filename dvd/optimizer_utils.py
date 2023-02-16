@@ -122,8 +122,8 @@ def get_cem_args_conf():
     parser.add_argument("--num_iter", type=int, default=100, help="Number of iterations of CEM")
 
     # learned visual dynamics model
-    parser.add_argument("--configs", nargs='+', required=True)
-    parser.add_argument("--saved_model_path", type=str, required=True)
+    parser.add_argument("--configs", nargs='+')
+    parser.add_argument("--saved_model_path", type=str)
 
     # optimizer specific
     parser.add_argument("--engineered_rewards", action='store_true', default=False, help='Use hand engineered rewards or not')
