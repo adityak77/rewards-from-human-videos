@@ -1,17 +1,11 @@
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import os
 import cv2
 import numpy as np
-from torch import nn as nn
 import torch
 import torch.multiprocessing as mp
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
 import functools
-
-import logging
 
 from sim_env.tabletop import Tabletop
 
@@ -26,13 +20,6 @@ from optimizer_utils import (get_cem_args_conf,
 from visual_dynamics_model import load_world_model, rollout_trajectory
 
 from inpaint_utils import get_robot_cfg, get_inpaint_model, get_segmentation_model_egohos, inpaint, inpaint_wrapper, inpaint_egohos
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG,
-                    format='[%(levelname)s %(asctime)s %(pathname)s:%(lineno)d] %(message)s',
-                    datefmt='%m-%d %H:%M:%S')
-logging.getLogger('matplotlib.font_manager').disabled = True
-logging.getLogger('PIL').disabled = True
 
 def run_cem(args, conf):
     TIMESTEPS = 51 # MPC lookahead - max length of episode

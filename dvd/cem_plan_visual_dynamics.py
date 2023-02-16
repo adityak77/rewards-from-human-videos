@@ -1,13 +1,8 @@
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import os
 import numpy as np
-from torch import nn as nn
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import time
-import logging
 
 from sim_env.tabletop import Tabletop
 
@@ -20,13 +15,6 @@ from optimizer_utils import (get_cem_args_conf,
                              tabletop_obs
                             )
 from visual_dynamics_model import load_world_model, rollout_trajectory
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG,
-                    format='[%(levelname)s %(asctime)s %(pathname)s:%(lineno)d] %(message)s',
-                    datefmt='%m-%d %H:%M:%S')
-logging.getLogger('matplotlib.font_manager').disabled = True
-logging.getLogger('PIL').disabled = True
 
 def run_cem(args, conf):
     TIMESTEPS = 51 # MPC lookahead - max length of episode
