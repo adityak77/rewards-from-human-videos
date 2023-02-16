@@ -330,54 +330,6 @@ def vip_reward(states, **kwargs):
     reward /= demo_goals_emb.shape[0]
     return reward
 
-def vip_reward_trajectory_similarity(states, **kwargs):
-    """
-    :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
-        K = batch size, T = trajectory size, nx = state embedding size
-
-    :param actions: (K x T x nu) Tensor
-
-    :returns rewards: (K x 1) Tensor
-    """
-    demos = kwargs['demos']
-
-    vip = load_vip().to(device)
-    vip.eval()
-
-    def preprocess(input):
-        transforms = ComposeMix([
-            [torchvision.transforms.ToPILImage(), "img"],
-            [torchvision.transforms.Resize(256), "img"],
-            [torchvision.transforms.CenterCrop(224), "img"],
-            [torchvision.transforms.ToTensor(), "img"],
-         ])
-
-        output = [(elem * 255).astype(np.uint8) for elem in input]
-        output = torch.stack(transforms(output)) # K x C x 224 x 224
-        output = (output * 255).to(torch.uint8).to(device)
-        return output
-
-    initial_states = preprocess(states[:, 0, :, :, :])    
-    final_states = preprocess(states[:, -1, :, :, :])
-    demo_starts = preprocess([demo[0] for demo in demos])
-    demo_goals = preprocess([demo[-1] for demo in demos])
-
-    with torch.no_grad():
-        initial_states_emb = vip(initial_states)
-        final_states_emb = vip(final_states)
-        demo_starts_emb = vip(demo_starts)
-        demo_goals_emb = vip(demo_goals)
-
-    traj_emb = final_states_emb - initial_states_emb
-    demo_traj_emb = demo_goals_emb - demo_starts_emb
-
-    reward = torch.zeros(final_states_emb.shape[0])
-    for demo in demo_traj_emb:
-        reward += torch.linalg.norm(demo - traj_emb, dim=1).cpu()
-
-    reward /= demo_goals_emb.shape[0]
-    return -reward
-
 def reward_push_mug_right_to_left(state, **kwargs):
     ''' 
     task 94: pushing mug right to left
