@@ -163,22 +163,23 @@ def get_cem_args_conf():
 
     # Config from YAML
     conf = {}
-    configs = tools.read_yamls('../pydreamer/config')
-    for name in args.configs:
-        if ',' in name:
-            for n in name.split(','):
-                conf.update(configs[n])
-        else:
-            conf.update(configs[name])
+    if args.configs is not None:
+        configs = tools.read_yamls('../pydreamer/config')
+        for name in args.configs:
+            if ',' in name:
+                for n in name.split(','):
+                    conf.update(configs[n])
+            else:
+                conf.update(configs[name])
 
-    # Override config from command-line
-    parser = argparse.ArgumentParser()
-    for key, value in conf.items():
-        type_ = type(value) if value is not None else str
-        if type_ == bool:
-            type_ = lambda x: bool(strtobool(x))
-        parser.add_argument(f'--{key}', type=type_, default=value)
-    conf = parser.parse_args(remaining)
+        # Override config from command-line
+        parser = argparse.ArgumentParser()
+        for key, value in conf.items():
+            type_ = type(value) if value is not None else str
+            if type_ == bool:
+                type_ = lambda x: bool(strtobool(x))
+            parser.add_argument(f'--{key}', type=type_, default=value)
+        conf = parser.parse_args(remaining)
 
     return args, conf
 

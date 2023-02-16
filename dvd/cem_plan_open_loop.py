@@ -116,12 +116,12 @@ def run_cem(args):
         if args.dvd:
             cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, 
                                   sample_rewards, calculate_add_reward=True, terminal_reward_fn=terminal_reward_fn, 
-                                  demos=demos)
-        if args.vip:
-            cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, 
-                                  sample_rewards, calculate_add_reward=True, terminal_reward_fn=terminal_reward_fn, 
                                   video_encoder=video_encoder, sim_discriminator=sim_discriminator, 
                                   demo_feats=demo_feats)
+        elif args.vip:
+            cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, 
+                                  sample_rewards, calculate_add_reward=True, terminal_reward_fn=terminal_reward_fn, 
+                                  demos=demos)
 
 if __name__ == '__main__':
     args, _ = get_cem_args_conf()
