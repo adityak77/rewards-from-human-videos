@@ -7,19 +7,28 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 import time
 import functools
 
+import warnings
+warnings.filterwarnings("ignore")
+
 from sim_env.tabletop import Tabletop
-
-from optimizer_utils import (get_cem_args_conf, 
-                             initialize_cem, 
-                             initialize_logger, 
-                             cem_iteration_logging, 
-                             decode_gif, 
-                             dvd_process_encode_batch, 
-                             tabletop_obs
-                            )
+from optimizer_utils import (
+    get_cem_args_conf, 
+    initialize_cem, 
+    initialize_logger, 
+    cem_iteration_logging, 
+    decode_gif, 
+    dvd_process_encode_batch, 
+    tabletop_obs
+)
+from inpaint_utils import (
+    get_robot_cfg, 
+    get_inpaint_model, 
+    get_segmentation_model_egohos, 
+    inpaint, 
+    inpaint_wrapper, 
+    inpaint_egohos
+)
 from visual_dynamics_model import load_world_model, rollout_trajectory
-
-from inpaint_utils import get_robot_cfg, get_inpaint_model, get_segmentation_model_egohos, inpaint, inpaint_wrapper, inpaint_egohos
 
 def run_cem(args, conf):
     TIMESTEPS = 51 # MPC lookahead - max length of episode
@@ -77,7 +86,7 @@ def run_cem(args, conf):
 
         for t in range(TIMESTEPS):
             if t % closed_loop_frequency == 0:
-                if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                if torch.linalg.matrix_rank(actions_cov) < actions_cov.shape[0]:
                     actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
                 action_distribution = MultivariateNormal(actions_mean, actions_cov)
                 action_samples = action_distribution.sample((N_SAMPLES,))
@@ -132,7 +141,7 @@ def run_cem(args, conf):
 
                 actions_mean = elites.mean(dim=0)
                 actions_cov = torch.Tensor(np.cov(elites.cpu().numpy().T))
-                if torch.matrix_rank(actions_cov) < actions_cov.shape[0]:
+                if torch.linalg.matrix_rank(actions_cov) < actions_cov.shape[0]:
                     actions_cov += 1e-5 * torch.eye(actions_cov.shape[0])
 
             # follow sampled trajectory
