@@ -122,9 +122,9 @@ def run_cem(args):
                         states[i][j] = cv2.cvtColor(states[i][j], cv2.COLOR_BGR2RGB)
     
             if args.dvd:
-                sample_rewards = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+                sample_rewards = terminal_reward_fn(states, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
             elif args.vip:
-                sample_rewards = terminal_reward_fn(states, _, demos=demos)
+                sample_rewards = terminal_reward_fn(states, demos=demos)
 
         # update elites
         _, best_inds = torch.topk(sample_rewards, NUM_ELITES)

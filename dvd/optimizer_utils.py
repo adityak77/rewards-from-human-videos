@@ -224,7 +224,7 @@ def tabletop_obs(info):
     return init_low_dim
 
 @torch.no_grad()
-def dvd_reward(states, actions, **kwargs):
+def dvd_reward(states, **kwargs):
     """
     :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
         K = batch size, T = trajectory size, nx = state embedding size
@@ -288,7 +288,7 @@ def dvd_process_encode_batch(samples, video_encoder):
 
     return states_enc
 
-def vip_reward(states, actions, **kwargs):
+def vip_reward(states, **kwargs):
     """
     :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
         K = batch size, T = trajectory size, nx = state embedding size
@@ -329,7 +329,7 @@ def vip_reward(states, actions, **kwargs):
     reward /= demo_goals_emb.shape[0]
     return reward
 
-def vip_reward_trajectory_similarity(states, actions, **kwargs):
+def vip_reward_trajectory_similarity(states, **kwargs):
     """
     :param states: (K x T x H x W x C) np.ndarray entries in [0-1]
         K = batch size, T = trajectory size, nx = state embedding size
@@ -377,7 +377,7 @@ def vip_reward_trajectory_similarity(states, actions, **kwargs):
     reward /= demo_goals_emb.shape[0]
     return -reward
 
-def reward_push_mug_right_to_left(state, action, **kwargs):
+def reward_push_mug_right_to_left(state, **kwargs):
     ''' 
     task 94: pushing mug right to left
     :param state: (nx) np.ndarray
@@ -400,7 +400,7 @@ def reward_push_mug_right_to_left(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_push_mug_away(state, action, **kwargs):
+def reward_push_mug_away(state, **kwargs):
     '''
     task 41: pushing mug away from camera
     :param state: (nx) np.ndarray
@@ -422,7 +422,7 @@ def reward_push_mug_away(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_close_drawer(state, action, **kwargs):
+def reward_close_drawer(state, **kwargs):
     '''
     task 5: closing drawer
     :param state: (K x nx) np.ndarray
@@ -444,7 +444,7 @@ def reward_close_drawer(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_push_mug_left_to_right(state, action, **kwargs):
+def reward_push_mug_left_to_right(state, **kwargs):
     '''
     task 93: move something left to right
     '''
@@ -455,7 +455,7 @@ def reward_push_mug_left_to_right(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_push_mug_close(state, action, **kwargs):
+def reward_push_mug_close(state, **kwargs):
     '''
     task 44: pushing mug close to camera
     '''
@@ -464,7 +464,7 @@ def reward_push_mug_close(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_open_drawer(state, action, **kwargs):
+def reward_open_drawer(state, **kwargs):
     '''
     task 46: opening drawer
     '''
@@ -477,7 +477,7 @@ def reward_open_drawer(state, action, **kwargs):
 
     return torch.Tensor([reward]).to(torch.float32)
 
-def reward_pickup_mug(state, action, **kwargs):
+def reward_pickup_mug(state, **kwargs):
     '''
     Task 48: picking up mug
     '''
@@ -625,10 +625,10 @@ def cem_iteration_logging(args,
             video_encoder = kwargs['video_encoder']
             sim_discriminator = kwargs['sim_discriminator']
             demo_feats = kwargs['demo_feats']
-            additional_reward = terminal_reward_fn(states, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(states, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         elif args.vip:
             demos = kwargs['demos']
-            additional_reward = terminal_reward_fn(states, _, demos=demos).item()
+            additional_reward = terminal_reward_fn(states, demos=demos).item()
     
     # calculate success and reward of trajectory
     any_timestep_succ = False

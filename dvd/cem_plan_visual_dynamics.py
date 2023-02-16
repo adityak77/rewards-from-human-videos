@@ -99,9 +99,9 @@ def run_cem(args, conf):
                 obs_sampled += 0.5
 
                 if args.dvd:
-                    sample_rewards = terminal_reward_fn(obs_sampled, _, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
+                    sample_rewards = terminal_reward_fn(obs_sampled, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator)
                 elif args.vip:
-                    sample_rewards = terminal_reward_fn(obs_sampled, _, demos=demos)
+                    sample_rewards = terminal_reward_fn(obs_sampled, demos=demos)
 
                 # update elites
                 _, best_inds = torch.topk(sample_rewards, NUM_ELITES)
