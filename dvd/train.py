@@ -67,6 +67,8 @@ def main():
         save_dir += '_lang_template'
     if args.lang_label:
         save_dir += '_lang_label'
+    if args.lang_align:
+        save_dir += '_lang_align'
     
     print(" > Output folder for this run -- {}".format(save_dir))
     if not os.path.exists(save_dir):
@@ -138,7 +140,7 @@ def training_loop(rank, args):
             resume_path = os.path.join(args.log_dir, 'model', str(args.sim_resume) + 'sim_discriminator.pth.tar')
             sim_discriminator.load_state_dict(torch.load(resume_path), strict=True)
         sim_discriminator = DDP(sim_discriminator, device_ids=[rank])
-    if args.pretrained:
+    if args.pretrained and not args.lang_align:
         for p in model.parameters():
             p.requires_grad = False
             
@@ -331,6 +333,9 @@ def training_loop(rank, args):
                 if args.similarity and rank == 0: # need to save sim discriminator
                     save_path = os.path.join(args.log_dir, 'model', str(epoch+1) + 'sim_discriminator.pth.tar')
                     torch.save(sim_discriminator.state_dict(), save_path)
+                if rank == 0: # save video encoder
+                    save_path = os.path.join(args.log_dir, 'model', str(epoch+1) + 'video_encoder.pth.tar')
+                    torch.save(model.state_dict(), save_path)
     
     cleanup_ddp()
             

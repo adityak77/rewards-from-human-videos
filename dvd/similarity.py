@@ -29,6 +29,7 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
     top1 = AverageMeter()
     
     class_losses = AverageMeter()
+    video_losses = AverageMeter()
     false_pos_meter = AverageMeter()
     false_neg_meter = AverageMeter()
     torch.autograd.set_detect_anomaly(True)
@@ -52,6 +53,8 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
         print("training rand length:", train_loader.dataset.traj_length)
 
     no_language = not (args.lang_label or args.lang_template)
+    if args.lang_align:
+        loss_video = nn.MSELoss().to(device)
     
     len_dataloader =len(train_loader) 
     data_source_iter = iter(train_loader)
@@ -74,14 +77,14 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
             pos_anchor_label = torch.ones(args.batch_size)
             neg_anchor_label = torch.zeros(args.batch_size)
 
-        else:
+        if not no_language or args.lang_align:
             with torch.no_grad():
                 pos_feat = generate_clip_labels(pos_text, clip_tokenizer, clip_model)
                 anchor_feat = generate_clip_labels(anchor_text, clip_tokenizer, clip_model)
                 neg_feat = generate_clip_labels(neg_text, clip_tokenizer, clip_model)
-
-                pos_anchor_label = cosine_similarity(anchor_feat, pos_feat)
-                neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
+                if not no_language:
+                    pos_anchor_label = cosine_similarity(anchor_feat, pos_feat)
+                    neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
 
         model.zero_grad()
         sim_discriminator.zero_grad()
@@ -103,10 +106,14 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
             class_loss = loss_class(F.softmax(class_out, dim=1)[:, 1], sim_labels)
                        
         loss = class_loss
+        if args.lang_align:
+            video_loss = loss_video(pos_enc, pos_feat) + loss_video(anchor_enc, anchor_feat) + loss_video(neg_enc, neg_feat)
+            loss += video_loss
 
         # measure accuracy and record loss
         losses.update(loss.item(), 1)
         class_losses.update(class_loss.item(), 1)
+        video_losses.update(video_loss.item(), 1)
 
         if no_language:
             prec1 = float(((class_out[:, 0] < class_out[:, 1]).to(torch.long) == sim_labels[:]).sum()) / class_out.shape[0]
@@ -136,9 +143,11 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Acc {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Classloss {class_losses.val:.3f} ({class_losses.avg:.3f})\t'.format(
+                  'Classloss {class_losses.val:.3f} ({class_losses.avg:.3f})\t'
+                  'Videoloss {video_losses.val:.3f} ({video_losses.avg:.3f})\t'.format(
                       epoch, i, len_dataloader, batch_time=batch_time,
-                      data_time=data_time, top1=top1, loss=losses, class_losses=class_losses))
+                      data_time=data_time, top1=top1, loss=losses, class_losses=class_losses,
+                      video_losses=video_losses))
         i += 1
     return losses.avg, top1.avg, class_losses.avg, false_pos_meter.avg, false_neg_meter.avg
 
@@ -167,6 +176,8 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
         val_loader.dataset.traj_length = rand_length
 
     no_language = not (args.lang_label or args.lang_template)
+    if args.lang_align:
+        loss_video = nn.MSELoss().to(device)
     
     end = time.time()
     with torch.no_grad():
@@ -182,18 +193,18 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
             neg_data = [neg_data.to(device)]
 
             # generate clip labels
-            if not no_language:
+            if no_language:
+                pos_anchor_label = torch.ones(args.batch_size)
+                neg_anchor_label = torch.zeros(args.batch_size)
+
+            if not no_language or args.lang_align:
                 with torch.no_grad():
                     pos_feat = generate_clip_labels(pos_text, clip_tokenizer, clip_model)
                     anchor_feat = generate_clip_labels(anchor_text, clip_tokenizer, clip_model)
                     neg_feat = generate_clip_labels(neg_text, clip_tokenizer, clip_model)
-
-                    pos_anchor_label = cosine_similarity(anchor_feat, pos_feat)
-                    neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
-
-            else:
-                pos_anchor_label = torch.ones(args.batch_size)
-                neg_anchor_label = torch.zeros(args.batch_size)
+                    if not no_language:
+                        pos_anchor_label = cosine_similarity(anchor_feat, pos_feat)
+                        neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
 
             # Encode videos
             pos_enc = model.module.encode(pos_data)
@@ -212,6 +223,9 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
                 class_loss = loss_class(F.softmax(class_out, dim=1)[:, 1], sim_labels)
                         
             loss = class_loss
+            if args.lang_align:
+                video_loss = loss_video(pos_enc, pos_feat) + loss_video(anchor_enc, anchor_feat) + loss_video(neg_enc, neg_feat)
+                loss += video_loss
 
             # measure accuracy and record loss
             losses.update(loss.item(), 1)
