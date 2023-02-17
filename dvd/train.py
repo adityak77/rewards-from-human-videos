@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from utils import load_args, setup_cuda_devices, setup_ddp, cleanup_ddp
+from utils import load_args, remove_module_from_checkpoint_state_dict, setup_cuda_devices, setup_ddp, cleanup_ddp
 from callbacks import (PlotLearning, AverageMeter)
 from multi_column import MultiColumn, SimilarityDiscriminator
 import torchvision
@@ -107,18 +107,6 @@ def training_loop(rank, args):
         if os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path)
             if args.pretrained:
-                def remove_module_from_checkpoint_state_dict(state_dict):
-                    """
-                    Removes the prefix `module` from weight names that gets added by
-                    torch.nn.DataParallel()
-                    """
-                    from collections import OrderedDict
-                    new_state_dict = OrderedDict()
-                    for k, v in state_dict.items():
-                        name = k[7:]  # remove `module.`
-                        new_state_dict[name] = v
-                    return new_state_dict
-
                 print("Loading in pretrained model")
                 checkpoint['state_dict'] = remove_module_from_checkpoint_state_dict(
                                           checkpoint['state_dict'])

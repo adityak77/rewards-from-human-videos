@@ -192,7 +192,10 @@ def decode_gif(video_path):
 def load_discriminator_model(args):
     print("Loading in discriminator model")
     sim_discriminator = SimilarityDiscriminator(args)
-    sim_discriminator.load_state_dict(torch.load(args.checkpoint), strict=True)
+    try:
+        sim_discriminator.load_state_dict(torch.load(args.checkpoint), strict=True)
+    except:
+        sim_discriminator.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(args.checkpoint)), strict=True)
 
     return sim_discriminator.to(device)
 
