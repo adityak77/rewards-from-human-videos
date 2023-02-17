@@ -228,7 +228,10 @@ def training_loop(rank, args):
     assert len(train_data.classes_dict.keys())//2 == args.num_tasks
 
     # define loss function (criterion)
-    loss_class = nn.CrossEntropyLoss().to(device)
+    if args.lang_label or args.lang_template:
+        loss_class = nn.MSELoss().to(device)
+    else:
+        loss_class = nn.CrossEntropyLoss().to(device)
 
     # define optimizer
     lr = args.lr

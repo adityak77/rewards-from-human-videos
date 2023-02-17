@@ -15,6 +15,7 @@ from transforms_video import *
 from collections import defaultdict, Counter
 import json
 
+from transformers import CLIPTokenizerFast
 
 FRAMERATE = 12  # default value
 
@@ -49,6 +50,9 @@ class VideoFolder(torch.utils.data.Dataset):
             self.robot_demo_transform = robot_demo_transform
             self.demo_batch_val = args.demo_batch_val
         
+        self.lang_label = args.lang_label
+        self.lang_template = args.lang_template
+         
         classes = []
         for key in self.classes_dict.keys():
             if not isinstance(key, int):
@@ -175,8 +179,17 @@ class VideoFolder(torch.utils.data.Dataset):
             pos_data = self.process_video(item)  
             anchor_data  = self.process_video(anchor)
             neg_data = self.process_video(neg)
-            return (pos_data, anchor_data, neg_data)
-            
+
+            sample = {
+                'pos_data': pos_data, 
+                'anchor_data': anchor_data, 
+                'neg_data': neg_data, 
+                'pos_text': item.label_specific if self.lang_label else item.label,
+                'anchor_text': anchor.label_specific if self.lang_label else anchor.label, 
+                'neg_text': neg.label_specific if self.lang_label else neg.label
+            }
+
+            return sample
 
     def __len__(self):
         self.total_files = len(self.json_data)

@@ -48,6 +48,7 @@ def load_args():
     parser.add_argument('--sd_augment', action='store_true', default=False, help='whether to add inpainted smth smth videos augmented with stable diffusion')
     parser.add_argument('--lang_template', action='store_true', default=False, help='whether to use language template in loss')
     parser.add_argument('--lang_label', action='store_true', default=False, help='whether to use language label in loss')
+    parser.add_argument('--clip_model_id', type=str, default='openai/clip-vit-base-patch32', help='CLIP text model to use')
     
     args = parser.parse_args()
     args.im_size_x = int(args.im_size * 1.5)

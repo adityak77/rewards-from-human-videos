@@ -7,15 +7,20 @@ import threading
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 from utils import *
 from callbacks import (PlotLearning, AverageMeter)
 from transforms_video import *
-import cv2
-import imageio
-import pickle
-from PIL import Image
+
+from transformers import CLIPTokenizerFast, CLIPModel
+
+def generate_clip_labels(text, tokenizer, model):
+    text_tokens = tokenizer(text, padding=True, return_tensors='pt').to(model.device)
+    text_feats = model.get_text_features(**text_tokens)
+
+    return text_feats
 
 def train_similarity(args, train_loader, model, sim_discriminator, loss_class, optimizer, epoch, device):
     batch_time = AverageMeter()
@@ -32,12 +37,21 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
     model.train()
     sim_discriminator.train()
 
+    # CLIP model
+    clip_tokenizer = CLIPTokenizerFast.from_pretrained(args.clip_model_id)
+    clip_model = CLIPModel.from_pretrained(args.clip_model_id).to(device)
+    clip_model.eval()
+
+    cosine_similarity = nn.CosineSimilarity(dim=1)
+
     end = time.time()
     # Want random length trajectories if video enc
     if args.traj_length == 0:
         rand_length = np.random.randint(20, 40)
         train_loader.dataset.traj_length = rand_length
         print("training rand length:", train_loader.dataset.traj_length)
+
+    no_language = not (args.lang_label or args.lang_template)
     
     len_dataloader =len(train_loader) 
     data_source_iter = iter(train_loader)
@@ -45,13 +59,29 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
     while i < len_dataloader:
         # training model using source data (Human data here, has labeled tasks)
         data_source = data_source_iter.next()
-        pos_data, anchor_data, neg_data = data_source
+        pos_data, anchor_data, neg_data = data_source['pos_data'], data_source['anchor_data'], data_source['neg_data']
+        pos_text, anchor_text, neg_text = data_source['pos_text'], data_source['anchor_text'], data_source['neg_text']
+
         # measure data loading time
         data_time.update(time.time() - end)
         
         pos_data = [pos_data.to(device)]
         anchor_data = [anchor_data.to(device)]
         neg_data = [neg_data.to(device)]
+
+        # generate clip labels
+        if no_language:
+            pos_anchor_label = torch.ones(args.batch_size)
+            neg_anchor_label = torch.zeros(args.batch_size)
+
+        else:
+            with torch.no_grad():
+                pos_feat = generate_clip_labels(pos_text, clip_tokenizer, clip_model)
+                anchor_feat = generate_clip_labels(anchor_text, clip_tokenizer, clip_model)
+                neg_feat = generate_clip_labels(neg_text, clip_tokenizer, clip_model)
+
+                pos_anchor_label = cosine_similarity(anchor_feat, pos_feat)
+                neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
 
         model.zero_grad()
         sim_discriminator.zero_grad()
@@ -64,24 +94,32 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
         # Calculate loss
         pos_anchor = sim_discriminator.forward(pos_enc, anchor_enc)
         neg_anchor = sim_discriminator.forward(anchor_enc, neg_enc)
-        pos_anchor_label = torch.ones(args.batch_size).long().to(device)
-        neg_anchor_label = torch.zeros(args.batch_size).long().to(device)
         class_out = torch.cat((pos_anchor, neg_anchor))  
-        sim_labels = torch.cat((pos_anchor_label, neg_anchor_label))
-        class_loss = loss_class(class_out, sim_labels)
+        sim_labels = torch.cat((pos_anchor_label, neg_anchor_label)).to(device)
+
+        if no_language:
+            class_loss = loss_class(class_out, sim_labels.long())
+        else:
+            class_loss = loss_class(F.softmax(class_out, dim=1)[:, 1], sim_labels)
                        
-        enc = torch.cat((pos_enc, anchor_enc, neg_enc))
         loss = class_loss
 
         # measure accuracy and record loss
-        prec1 = float(((class_out[:, 0] < class_out[:, 1]).to(torch.long) == sim_labels[:]).sum()) / class_out.shape[0]
-        top1.update(prec1, 1) #class_out.size(0)
         losses.update(loss.item(), 1)
         class_losses.update(class_loss.item(), 1)
-        false_pos = float(((class_out[:, 0] < class_out[:, 1]) & (sim_labels[:] == 0)).sum()) / float((sim_labels[:] == 0).sum())
-        false_neg = float(((class_out[:, 0] > class_out[:, 1]) & (sim_labels[:] == 1)).sum()) / float((sim_labels[:] == 1).sum())
-        false_pos_meter.update(false_pos, 1)
-        false_neg_meter.update(false_neg, 1)
+
+        if no_language:
+            prec1 = float(((class_out[:, 0] < class_out[:, 1]).to(torch.long) == sim_labels[:]).sum()) / class_out.shape[0]
+            top1.update(prec1, 1) #class_out.size(0)
+            false_pos = float(((class_out[:, 0] < class_out[:, 1]) & (sim_labels[:] == 0)).sum()) / float((sim_labels[:] == 0).sum())
+            false_neg = float(((class_out[:, 0] > class_out[:, 1]) & (sim_labels[:] == 1)).sum()) / float((sim_labels[:] == 1).sum())
+            false_pos_meter.update(false_pos, 1)
+            false_neg_meter.update(false_neg, 1)
+        else: 
+            # classification metrics not applicable
+            top1.update(0, 1)
+            false_pos_meter.update(0, 1)
+            false_neg_meter.update(0, 1)
 
         # compute gradient and do SGD step for task classifier
         optimizer.zero_grad()
@@ -116,10 +154,19 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
     model.eval()
     sim_discriminator.eval()
 
+    # CLIP model
+    clip_tokenizer = CLIPTokenizerFast.from_pretrained(args.clip_model_id)
+    clip_model = CLIPModel.from_pretrained(args.clip_model_id).to(device)
+    clip_model.eval()
+    
+    cosine_similarity = nn.CosineSimilarity(dim=1)
+    
     # Want random length trajectories
     if args.traj_length == 0:
         rand_length = np.random.randint(20, 40)
         val_loader.dataset.traj_length = rand_length
+
+    no_language = not (args.lang_label or args.lang_template)
     
     end = time.time()
     with torch.no_grad():
@@ -127,11 +174,26 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
         i = 0
         while i < len(val_loader):
             data_source = data_source_iter.next()
-            pos_data, anchor_data, neg_data = data_source
+            pos_data, anchor_data, neg_data = data_source['pos_data'], data_source['anchor_data'], data_source['neg_data']
+            pos_text, anchor_text, neg_text = data_source['pos_text'], data_source['anchor_text'], data_source['neg_text']
 
             pos_data = [pos_data.to(device)]
             anchor_data = [anchor_data.to(device)]
             neg_data = [neg_data.to(device)]
+
+            # generate clip labels
+            if not no_language:
+                with torch.no_grad():
+                    pos_feat = generate_clip_labels(pos_text, clip_tokenizer, clip_model)
+                    anchor_feat = generate_clip_labels(anchor_text, clip_tokenizer, clip_model)
+                    neg_feat = generate_clip_labels(neg_text, clip_tokenizer, clip_model)
+
+                    pos_anchor_label = cosine_similarity(anchor_feat, pos_feat)
+                    neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
+
+            else:
+                pos_anchor_label = torch.ones(args.batch_size)
+                neg_anchor_label = torch.zeros(args.batch_size)
 
             # Encode videos
             pos_enc = model.module.encode(pos_data)
@@ -141,21 +203,31 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
             # Calculate loss
             pos_anchor = sim_discriminator.forward(pos_enc, anchor_enc)
             neg_anchor = sim_discriminator.forward(anchor_enc, neg_enc)
-            pos_anchor_label = torch.ones([args.batch_size]).long().to(device)
-            neg_anchor_label = torch.zeros([args.batch_size]).long().to(device)
-            class_out = torch.cat((pos_anchor, neg_anchor)) 
-            sim_labels = torch.cat((pos_anchor_label, neg_anchor_label))
-            class_loss = loss_class(class_out, sim_labels)
-            
-            enc = torch.cat((pos_enc, anchor_enc, neg_enc))
-            
-            prec1 = float(((class_out[:, 0] < class_out[:, 1]).to(torch.long) == sim_labels[:]).sum()) / class_out.shape[0]
-            false_pos = float(((class_out[:, 0] < class_out[:, 1]) & (sim_labels[:] == 0)).sum()) / float((sim_labels[:] == 0).sum())
-            false_neg = float(((class_out[:, 0] > class_out[:, 1]) & (sim_labels[:] == 1)).sum()) / float((sim_labels[:] == 1).sum())
-            false_pos_meter.update(false_pos, 1)
-            false_neg_meter.update(false_neg, 1)
-            top1.update(prec1, 1)
-            losses.update(class_loss.item(), 1)
+            class_out = torch.cat((pos_anchor, neg_anchor))  
+            sim_labels = torch.cat((pos_anchor_label, neg_anchor_label)).to(device)
+
+            if no_language:
+                class_loss = loss_class(class_out, sim_labels.long())
+            else:
+                class_loss = loss_class(F.softmax(class_out, dim=1)[:, 1], sim_labels)
+                        
+            loss = class_loss
+
+            # measure accuracy and record loss
+            losses.update(loss.item(), 1)
+
+            if no_language:
+                prec1 = float(((class_out[:, 0] < class_out[:, 1]).to(torch.long) == sim_labels[:]).sum()) / class_out.shape[0]
+                top1.update(prec1, 1) #class_out.size(0)
+                false_pos = float(((class_out[:, 0] < class_out[:, 1]) & (sim_labels[:] == 0)).sum()) / float((sim_labels[:] == 0).sum())
+                false_neg = float(((class_out[:, 0] > class_out[:, 1]) & (sim_labels[:] == 1)).sum()) / float((sim_labels[:] == 1).sum())
+                false_pos_meter.update(false_pos, 1)
+                false_neg_meter.update(false_neg, 1)
+            else: 
+                # classification metrics not applicable
+                top1.update(0, 1)
+                false_pos_meter.update(0, 1)
+                false_neg_meter.update(0, 1)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
