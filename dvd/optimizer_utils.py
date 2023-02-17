@@ -231,7 +231,18 @@ def dvd_reward(states, **kwargs):
     
     rewards_demo = torch.zeros(states.shape[0])
     states = (states * 255).astype(np.uint8)
-    states_feats = dvd_process_encode_batch(states, video_encoder)
+
+    CHUNK_SIZE = 50
+    batch_num = 0
+    states_feats_list = []
+    while batch_num*CHUNK_SIZE < states.shape[0]:
+        loc = slice(batch_num*CHUNK_SIZE, min((batch_num+1)*CHUNK_SIZE, states.shape[0]))
+        feat = dvd_process_encode_batch(states[loc], video_encoder)
+        states_feats_list.append(feat)
+        # torch.cuda.empty_cache()
+        batch_num += 1
+
+    states_feats = torch.cat(states_feats_list, dim=0)
     
     sim_discriminator.eval()
     for demo_feat in demo_feats:
