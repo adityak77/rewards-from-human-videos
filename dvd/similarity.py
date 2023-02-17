@@ -234,14 +234,25 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
             end = time.time()
 
             if i % 10 == 0:
-                print('Test: [{0}/{1}]\t'
+                if no_language:
+                    print('Test: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.3f} ({loss.avg:.3f})'.format(
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                           i, len(val_loader), batch_time=batch_time,
-                          loss=losses))
+                          top1=top1))
+                else:
+                    print('Test: [{0}/{1}]\t'
+                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                        'Loss {loss.val:.3f} ({loss.avg:.3f})'.format(
+                            i, len(val_loader), batch_time=batch_time,
+                            loss=losses))
             i += 1
-        
-    print(' * Prec@1 {loss.avg:.3f}'
-          .format(loss=losses))
+
+    if no_language:
+        print(' * Prec@1 {top1.avg:.3f}'
+              .format(top1=top1))
+    else: 
+        print(' * Prec@1 {loss.avg:.3f}'
+            .format(loss=losses))
 
     return losses.avg, top1.avg, false_pos_meter.avg, false_neg_meter.avg
