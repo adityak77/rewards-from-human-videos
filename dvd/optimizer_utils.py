@@ -573,20 +573,44 @@ def cem_iteration_logging(args,
                           very_start, 
                           sample_rewards,
                           calculate_add_reward=False,
+                          inpainted_rewards=False,
                           **kwargs
     ):
     additional_reward_type = 'vip' if args.vip else 'dvd'
     additional_reward = 0
+    all_obs_inpainted = None
     if calculate_add_reward:
         terminal_reward_fn = kwargs['terminal_reward_fn']
+        reward_states = states # states to be used for reward, either inpainted or not
+        if inpainted_rewards:
+            # Inpaint states here
+            from inpaint_utils import get_segmentation_model, inpaint
+            robot_cfg = kwargs['robot_cfg']
+            robot_segmentation_model = get_segmentation_model(robot_cfg)
+            inpaint_model = kwargs['inpaint_model']
+            inpaint_states = (states * 255).astype(np.uint8)
+
+            if not args.no_robot_inpaint:
+                # detectron2 input is BGR
+                for j in range(len(inpaint_states[0])):
+                    inpaint_states[0][j] = cv2.cvtColor(inpaint_states[0][j], cv2.COLOR_RGB2BGR)
+
+                inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
+
+                # convert back to RGB
+                for j in range(len(inpaint_states[0])):
+                    inpaint_states[0][j] = cv2.cvtColor(inpaint_states[0][j], cv2.COLOR_BGR2RGB)
+            reward_states = inpaint_states
+            all_obs_inpainted = inpaint_states[0] # (inpaint_states[0] * 255).astype(np.uint8)
+            
         if args.dvd:
             video_encoder = kwargs['video_encoder']
             sim_discriminator = kwargs['sim_discriminator']
             demo_feats = kwargs['demo_feats']
-            additional_reward = terminal_reward_fn(states, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(reward_states, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         elif args.vip:
             demos = kwargs['demos']
-            additional_reward = terminal_reward_fn(states, demos=demos).item()
+            additional_reward = terminal_reward_fn(reward_states, demos=demos).item()
     
     # calculate success and reward of trajectory
     any_timestep_succ = False
@@ -603,7 +627,7 @@ def cem_iteration_logging(args,
 
     # logging results
     all_obs = (states[0] * 255).astype(np.uint8)
-    cem_logger.save_graphs(all_obs)
+    cem_logger.save_graphs(all_obs, all_obs_inpainted)
 
     res_dict = {
         'total_iterations': cem_logger.total_iterations,

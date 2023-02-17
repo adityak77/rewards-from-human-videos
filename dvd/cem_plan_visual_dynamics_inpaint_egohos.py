@@ -24,7 +24,6 @@ from inpaint_utils import (
     get_robot_cfg, 
     get_inpaint_model, 
     get_segmentation_model_egohos, 
-    inpaint, 
     inpaint_wrapper, 
     inpaint_egohos
 )
@@ -161,7 +160,11 @@ def run_cem(args, conf):
         states[0] += 0.5
 
         # logging sampled trajectory
-        cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, sample_rewards)
+        cem_iteration_logging(args, TIMESTEPS, ep, ep_time, cem_logger, states, all_low_dim_states, very_start, 
+                              sample_rewards, calculate_add_reward=True, inpainted_rewards=True,
+                              terminal_reward_fn=terminal_reward_fn, robot_cfg=robot_cfg,
+                              inpaint_model=inpaint_model, video_encoder=video_encoder, 
+                              sim_discriminator=sim_discriminator, demo_feats=demo_feats)
 
 def main():
     mp.set_start_method('spawn')
