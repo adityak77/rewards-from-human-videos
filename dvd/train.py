@@ -336,4 +336,5 @@ def training_loop(rank, args):
             
 
 if __name__ == '__main__':
+    # os.environ["TOKENIZERS_PARALLELISM"] = "false" # either do this or switch from fast tokenizer to regular tokenizer
     main()

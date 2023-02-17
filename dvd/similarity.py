@@ -14,7 +14,7 @@ from utils import *
 from callbacks import (PlotLearning, AverageMeter)
 from transforms_video import *
 
-from transformers import CLIPTokenizerFast, CLIPModel
+from transformers import CLIPTokenizer, CLIPModel
 
 def generate_clip_labels(text, tokenizer, model):
     text_tokens = tokenizer(text, padding=True, return_tensors='pt').to(model.device)
@@ -38,7 +38,7 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
     sim_discriminator.train()
 
     # CLIP model
-    clip_tokenizer = CLIPTokenizerFast.from_pretrained(args.clip_model_id)
+    clip_tokenizer = CLIPTokenizer.from_pretrained(args.clip_model_id)
     clip_model = CLIPModel.from_pretrained(args.clip_model_id).to(device)
     clip_model.eval()
 
@@ -155,7 +155,7 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
     sim_discriminator.eval()
 
     # CLIP model
-    clip_tokenizer = CLIPTokenizerFast.from_pretrained(args.clip_model_id)
+    clip_tokenizer = CLIPTokenizer.from_pretrained(args.clip_model_id)
     clip_model = CLIPModel.from_pretrained(args.clip_model_id).to(device)
     clip_model.eval()
     
@@ -236,12 +236,12 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
             if i % 10 == 0:
                 print('Test: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                      'Loss {loss.val:.3f} ({loss.avg:.3f})'.format(
                           i, len(val_loader), batch_time=batch_time,
-                          top1=top1))
+                          loss=losses))
             i += 1
         
-    print(' * Prec@1 {top1.avg:.3f}'
-          .format(top1=top1))
+    print(' * Prec@1 {loss.avg:.3f}'
+          .format(loss=losses))
 
     return losses.avg, top1.avg, false_pos_meter.avg, false_neg_meter.avg

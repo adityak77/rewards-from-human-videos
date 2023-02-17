@@ -6,6 +6,7 @@ dvd/data*
 !dvd/data_inpaint*
 
 dvd/test/*
+dvd/test_lang/*
 dvd/tmp
 
 smthsmth/

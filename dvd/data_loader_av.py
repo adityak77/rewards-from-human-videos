@@ -15,8 +15,6 @@ from transforms_video import *
 from collections import defaultdict, Counter
 import json
 
-from transformers import CLIPTokenizerFast
-
 FRAMERATE = 12  # default value
 
 class VideoFolder(torch.utils.data.Dataset):
