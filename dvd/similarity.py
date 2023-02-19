@@ -48,7 +48,7 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
     end = time.time()
     # Want random length trajectories if video enc
     if args.traj_length == 0:
-        rand_length = np.random.randint(20, 40)
+        rand_length = 35 # np.random.randint(25, 35)
         train_loader.dataset.traj_length = rand_length
         print("training rand length:", train_loader.dataset.traj_length)
 
@@ -172,7 +172,7 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
     
     # Want random length trajectories
     if args.traj_length == 0:
-        rand_length = np.random.randint(20, 40)
+        rand_length = np.random.randint(25, 35)
         val_loader.dataset.traj_length = rand_length
 
     no_language = not (args.lang_label or args.lang_template)
