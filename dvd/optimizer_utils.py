@@ -125,6 +125,7 @@ def get_cem_args_conf():
     parser.add_argument("--demo_path", type=str, default=None, help='path to demo video')
 
     # dvd model params
+    parser.add_argument("--video_checkpoint", type=str, default='pretrained/video_encoder/model_best.pth.tar', help='path to model')
     parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
     parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
     parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
@@ -203,8 +204,11 @@ def load_encoder_model(args):
     print("Loading in pretrained model")
     cnn_def = importlib.import_module("{}".format('model3D_1'))
     model = MultiColumn(args, args.num_tasks, cnn_def.Model, int(args.hidden_size))
-    model_checkpoint = os.path.join('pretrained/video_encoder/', 'model_best.pth.tar')
-    model.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(model_checkpoint)['state_dict']), strict=False)
+    model_checkpoint = args.video_checkpoint
+    try:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(model_checkpoint)['state_dict']), strict=False)
+    except:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(model_checkpoint)), strict=False)
 
     return model.to(device)
 
