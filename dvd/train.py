@@ -84,7 +84,7 @@ def main():
 
 def training_loop(rank, args):
     print(f"Running training loop on device {rank}")
-    device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+    # device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
 
     # set column model
     cnn_def = importlib.import_module("{}".format('model3D_1'))
@@ -92,6 +92,8 @@ def training_loop(rank, args):
     best_loss = float('Inf')
 
     setup_ddp(rank, args.num_gpus)
+    dev0 = (rank * 2) % args.num_gpus
+    dev1 = (rank * 2 + 1) % args.num_gpus
 
     # create model
     print(" > Creating model ... !")
@@ -119,15 +121,15 @@ def training_loop(rank, args):
             print(" !#! No checkpoint found at '{}'".format(
                 checkpoint_path))
             assert(False)
-    model = model.to(device)
-    model = DDP(model, device_ids=[rank])
+    # model = model.to(device)
+    model = DDP(model, device_ids=[dev0, dev1])
         
     if args.similarity:
-        sim_discriminator = SimilarityDiscriminator(args).to(device)
+        sim_discriminator = SimilarityDiscriminator(args) # .to(device)
         if args.sim_resume:
             resume_path = os.path.join(args.log_dir, 'model', str(args.sim_resume) + 'sim_discriminator.pth.tar')
             sim_discriminator.load_state_dict(torch.load(resume_path), strict=True)
-        sim_discriminator = DDP(sim_discriminator, device_ids=[rank])
+        sim_discriminator = DDP(sim_discriminator, device_ids=[dev0, dev1])
     if args.pretrained and not args.lang_align:
         for p in model.parameters():
             p.requires_grad = False
@@ -219,9 +221,9 @@ def training_loop(rank, args):
 
     # define loss function (criterion)
     if args.lang_label or args.lang_template:
-        loss_class = nn.MSELoss().to(device)
+        loss_class = nn.MSELoss().to(dev0) # .to(device)
     else:
-        loss_class = nn.CrossEntropyLoss().to(device)
+        loss_class = nn.CrossEntropyLoss().to(dev0) # .to(device)
 
     # define optimizer
     lr = args.lr
@@ -265,14 +267,15 @@ def training_loop(rank, args):
         if args.similarity:
             train_loader.sampler.set_epoch(epoch)
             train_loss, train_top1, class_loss, false_pos_train, false_neg_train = train_similarity(args, 
-            train_loader, model, sim_discriminator, loss_class, optimizer, epoch, device)
+            train_loader, model, sim_discriminator, loss_class, optimizer, epoch, dev0)
         
         # evaluate on validation set
         if epoch % args.log_freq == 0:
             print("Evaluating on epoch", epoch)
             if args.similarity:
                 val_loader.sampler.set_epoch(epoch)
-                val_loss, val_top1, false_pos, false_neg = validate_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch, device)
+                val_loss, val_top1, false_pos, false_neg = validate_similarity(args, val_loader, model, 
+                sim_discriminator, loss_class, epoch, dev0)
                 
             # set learning rate
             lr_decayer.step(val_loss)

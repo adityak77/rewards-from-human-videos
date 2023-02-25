@@ -36,7 +36,7 @@ class SimilarityDiscriminator(nn.Module):
 class MultiColumn(nn.Module):
 
     def __init__(self, args, num_classes, conv_column, column_units,
-                 clf_layers=None):
+                 dev0=None, dev1=None, clf_layers=None):
         """
         - Example video encoder
 
@@ -47,7 +47,13 @@ class MultiColumn(nn.Module):
         """
         super(MultiColumn, self).__init__()
         self.column_units = column_units
-        self.conv_column = conv_column(column_units)
+
+        if not dev0:
+            dev0 = torch.device("cpu")
+        if dev0 and not dev1:
+            dev1 = dev0
+
+        self.conv_column = conv_column(column_units, dev0, dev1)
         self.similarity = args.similarity
             
     def encode(self, inputs):
