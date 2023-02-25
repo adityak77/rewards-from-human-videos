@@ -55,7 +55,7 @@ class Model(nn.Module):
             nn.Dropout3d(p=0.2),
         )
 
-        self.block3 = self.block3.to(dev0)
+        self.block3 = self.block3.to(dev1)
 
         self.block4 = nn.Sequential(
             nn.Conv3d(256, 256, kernel_size=(3, 3, 3), stride=1, dilation=(1, 1, 1), padding=(1, 1, 1)),
@@ -90,10 +90,10 @@ class Model(nn.Module):
 
         x = self.block1(x)
         x = self.block2(x)
-        x = self.block3(x)
 
         x = x.to(self.dev1)
 
+        x = self.block3(x)
         x = self.block4(x)
         x = self.block5(x)
 
