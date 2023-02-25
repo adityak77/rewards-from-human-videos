@@ -90,7 +90,7 @@ def setup_cuda_devices(args):
     device_ids = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        device_ids = [int(i) for i in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
+        device_ids = [0] # [int(i) for i in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
     return device, device_ids
 
 

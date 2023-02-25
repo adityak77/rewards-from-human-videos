@@ -90,9 +90,9 @@ def train_similarity(args, train_loader, model, sim_discriminator, loss_class, o
         sim_discriminator.zero_grad()
         
         # Encode videos
-        pos_enc = model.module.encode(pos_data)
-        anchor_enc = model.module.encode(anchor_data)
-        neg_enc = model.module.encode(neg_data)
+        pos_enc = model.encode(pos_data)
+        anchor_enc = model.encode(anchor_data)
+        neg_enc = model.encode(neg_data)
         
         # Calculate loss
         pos_anchor = sim_discriminator.forward(pos_enc, anchor_enc)
@@ -207,9 +207,9 @@ def validate_similarity(args, val_loader, model, sim_discriminator, loss_class, 
                         neg_anchor_label = cosine_similarity(anchor_feat, neg_feat)
 
             # Encode videos
-            pos_enc = model.module.encode(pos_data)
-            anchor_enc = model.module.encode(anchor_data)
-            neg_enc = model.module.encode(neg_data)
+            pos_enc = model.encode(pos_data)
+            anchor_enc = model.encode(anchor_data)
+            neg_enc = model.encode(neg_data)
         
             # Calculate loss
             pos_anchor = sim_discriminator.forward(pos_enc, anchor_enc)
