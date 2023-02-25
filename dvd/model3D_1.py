@@ -15,14 +15,20 @@ class Model(nn.Module):
     - Returns: a (batch_size, 512) sized tensor
     """
 
-    def __init__(self, column_units):
+    def __init__(self, column_units, dev0, dev1):
         super(Model, self).__init__()
+
+        self.dev0 = dev0
+        self.dev1 = dev1
+
         self.block1 = nn.Sequential(
             nn.Conv3d(3, 32, kernel_size=(3, 5, 5), stride=(1, 2, 2), dilation=(1, 1, 1), padding=(1, 2, 2)),
             nn.BatchNorm3d(32),
             nn.ReLU(inplace=True),
             nn.Dropout3d(p=0.2),
         )
+
+        self.block1 = self.block1.to(dev0)
 
         self.block2 = nn.Sequential(
             nn.Conv3d(32, 64, kernel_size=(3, 3, 3), stride=1, dilation=(1, 1, 1), padding=(1, 1, 1)),
@@ -33,6 +39,8 @@ class Model(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout3d(p=0.2),
         )
+
+        self.block2 = self.block2.to(dev0)
 
         self.block3 = nn.Sequential(
             nn.Conv3d(128, 128, kernel_size=(3, 3, 3), stride=1, dilation=(1, 1, 1), padding=(1, 1, 1)),
@@ -47,6 +55,8 @@ class Model(nn.Module):
             nn.Dropout3d(p=0.2),
         )
 
+        self.block3 = self.block3.to(dev0)
+
         self.block4 = nn.Sequential(
             nn.Conv3d(256, 256, kernel_size=(3, 3, 3), stride=1, dilation=(1, 1, 1), padding=(1, 1, 1)),
             nn.BatchNorm3d(256),
@@ -60,6 +70,8 @@ class Model(nn.Module):
             nn.Dropout3d(p=0.2),
         )
 
+        self.block4 = self.block4.to(dev1)
+
         self.block5 = nn.Sequential(
             nn.Conv3d(512, 512, kernel_size=(3, 3, 3), stride=1, dilation=(1, 1, 1), padding=(1, 1, 1)),
             nn.BatchNorm3d(512),
@@ -69,17 +81,26 @@ class Model(nn.Module):
             nn.ReLU(inplace=True),
         )
 
+        self.block5 = self.block5.to(dev1)
+
     def forward(self, x):
         # get convolution column features
+
+        x = x.to(self.dev0)
 
         x = self.block1(x)
         x = self.block2(x)
         x = self.block3(x)
+
+        x = x.to(self.dev1)
+
         x = self.block4(x)
         x = self.block5(x)
 
         # averaging features in time dimension
         x = x.mean(-1).mean(-1).mean(-1)
+
+        x = x.to(self.dev0)
         return x
 
 
