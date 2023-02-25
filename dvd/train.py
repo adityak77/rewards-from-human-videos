@@ -80,12 +80,13 @@ def main():
         json.dump(args.__dict__, f, indent=2)
     args.log_dir = save_dir
 
-    mp.spawn(training_loop, args=(args,), nprocs=args.num_gpus, join=True)
+    mp.spawn(training_loop, args=(args,), nprocs=num_gpus, join=True)
 
 
 def training_loop(rank, args):
     print(f"Running training loop on device {rank}")
     # device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+    torch.cuda.set_device(rank)
 
     # set column model
     cnn_def = importlib.import_module("{}".format('model3D_1'))
@@ -99,7 +100,7 @@ def training_loop(rank, args):
     # create model
     print(" > Creating model ... !")
     model = MultiColumn(args, args.num_tasks, cnn_def.Model,
-                        int(args.hidden_size))
+                        int(args.hidden_size), dev0=dev0, dev1=dev1)
 
     if args.resume or args.pretrained: # optionally resume from a checkpoint
         if args.pretrained:
@@ -129,14 +130,14 @@ def training_loop(rank, args):
                 checkpoint_path))
             assert(False)
     # model = model.to(device)
-    model = DDP(model, device_ids=[dev0, dev1])
+    # model = DDP(model) 
         
     if args.similarity:
-        sim_discriminator = SimilarityDiscriminator(args) # .to(device)
+        sim_discriminator = SimilarityDiscriminator(args).to(dev0)
         if args.sim_resume:
             resume_path = os.path.join(args.log_dir, 'model', str(args.sim_resume) + 'sim_discriminator.pth.tar')
             sim_discriminator.load_state_dict(torch.load(resume_path), strict=True)
-        sim_discriminator = DDP(sim_discriminator, device_ids=[dev0, dev1])
+        # sim_discriminator = DDP(sim_discriminator, device_ids=[dev0])
     if args.pretrained and not args.lang_align:
         for p in model.parameters():
             p.requires_grad = False
@@ -273,6 +274,11 @@ def training_loop(rank, args):
         report_losses['false_neg'] = []
         report_losses['false_pos_train'] = []
         report_losses['false_neg_train'] = []
+
+    try:
+        video_encoder = model.module
+    except:
+        video_encoder = model
 
     for epoch in range(start_epoch, args.num_epochs):
         lrs = [params['lr'] for params in optimizer.param_groups]
