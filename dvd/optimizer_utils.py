@@ -193,10 +193,15 @@ def decode_gif(video_path):
 def load_discriminator_model(args):
     print("Loading in discriminator model")
     sim_discriminator = SimilarityDiscriminator(args)
+
+    model_checkpoint = torch.load(args.checkpoint)
+    if 'sim_discriminator_state_dict' in model_checkpoint:
+        model_checkpoint = model_checkpoint['sim_discriminator_state_dict']
+    
     try:
-        sim_discriminator.load_state_dict(torch.load(args.checkpoint), strict=True)
+        sim_discriminator.load_state_dict(model_checkpoint, strict=True)
     except:
-        sim_discriminator.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(args.checkpoint)), strict=True)
+        sim_discriminator.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint), strict=True)
 
     return sim_discriminator.to(device)
 
@@ -204,11 +209,14 @@ def load_encoder_model(args):
     print("Loading in pretrained model")
     cnn_def = importlib.import_module("{}".format('model3D_1'))
     model = MultiColumn(args, args.num_tasks, cnn_def.Model, int(args.hidden_size))
-    model_checkpoint = args.video_checkpoint
-    try:
-        model.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(model_checkpoint)['state_dict']), strict=False)
-    except:
-        model.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(model_checkpoint)), strict=False)
+    model_checkpoint = torch.load(args.video_checkpoint)
+
+    if 'encoder_state_dict' in model_checkpoint:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint['encoder_state_dict']), strict=False)
+    elif 'state_dict' in model_checkpoint:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint['state_dict']), strict=False)
+    else:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint), strict=False)
 
     return model.to(device)
 
