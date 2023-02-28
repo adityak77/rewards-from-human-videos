@@ -6,8 +6,11 @@ import importlib
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.multiprocessing as mp
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
-from utils import load_args, setup_cuda_devices
+from utils import load_args, setup_cuda_devices, setup_ddp, cleanup_ddp
 from callbacks import (PlotLearning, AverageMeter)
 from multi_column import MultiColumn, SimilarityDiscriminator
 import torchvision
@@ -26,15 +29,10 @@ def main():
     # load args
     args = load_args()
 
-    # set column model
-    cnn_def = importlib.import_module("{}".format('model3D_1'))
-
     # setup device - CPU or GPU
-    device, device_ids = setup_cuda_devices(args)
-    print(" > Using device: {}".format(device.type))
+    dev, device_ids = setup_cuda_devices(args)
+    print(" > Using device: {}".format(dev.type))
     print(" > Active GPU ids: {}".format(device_ids))
-
-    best_loss = float('Inf')
 
     args.human_tasks = [int(i) for i in args.human_tasks]
     args.robot_tasks = [int(i) for i in args.robot_tasks]
@@ -79,6 +77,20 @@ def main():
         json.dump(args.__dict__, f, indent=2)
     args.log_dir = save_dir
 
+    mp.spawn(training_loop, args=(args,), nprocs=args.num_gpus, join=True)
+
+
+def training_loop(rank, args):
+    print(f"Running training loop on device {rank}")
+    device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+
+    # set column model
+    cnn_def = importlib.import_module("{}".format('model3D_1'))
+
+    best_loss = float('Inf')
+
+    setup_ddp(rank, args.num_gpus)
+
     # create model
     print(" > Creating model ... !")
     model = MultiColumn(args, args.num_tasks, cnn_def.Model,
@@ -118,12 +130,14 @@ def main():
                 checkpoint_path))
             assert(False)
     model = model.to(device)
+    model = DDP(model, device_ids=[rank])
         
     if args.similarity:
         sim_discriminator = SimilarityDiscriminator(args).to(device)
         if args.sim_resume:
             resume_path = os.path.join(args.log_dir, 'model', str(args.sim_resume) + 'sim_discriminator.pth.tar')
             sim_discriminator.load_state_dict(torch.load(resume_path), strict=True)
+        sim_discriminator = DDP(sim_discriminator, device_ids=[rank])
     if args.pretrained:
         for p in model.parameters():
             p.requires_grad = False
@@ -181,13 +195,14 @@ def main():
                              robot_demo_transform=robot_demo_transform,
                              )
 
-    print(" > Using {} processes for data loader.".format(2))
+    num_dataloader_workers = 6 * args.num_gpus
+    print(" > Using {} processes for data loader.".format(num_dataloader_workers))
 
     train_loader = torch.utils.data.DataLoader(
         train_data,
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=2, pin_memory=True,
-        drop_last=True)
+        batch_size=args.batch_size, shuffle=False,
+        num_workers=num_dataloader_workers, pin_memory=True,
+        drop_last=True, sampler=DistributedSampler(train_data))
 
     val_data = VideoFolder(args, 
                            root=args.human_data_dir,
@@ -205,15 +220,18 @@ def main():
 
     val_loader = torch.utils.data.DataLoader(
         val_data,
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=2, pin_memory=True,
-        drop_last=True)
+        batch_size=args.batch_size, shuffle=False,
+        num_workers=num_dataloader_workers, pin_memory=True,
+        drop_last=True, sampler=DistributedSampler(val_data))
 
     print(" > Number of dataset classes : {}".format(len(train_data.classes_dict.keys())//2))
     assert len(train_data.classes_dict.keys())//2 == args.num_tasks
 
     # define loss function (criterion)
-    loss_class = nn.CrossEntropyLoss().to(device)
+    if args.lang_label or args.lang_template:
+        loss_class = nn.MSELoss().to(device)
+    else:
+        loss_class = nn.CrossEntropyLoss().to(device)
 
     # define optimizer
     lr = args.lr
@@ -248,7 +266,6 @@ def main():
     report_losses['false_neg_train'] = []
 
     for epoch in range(start_epoch, args.num_epochs):
-
         lrs = [params['lr'] for params in optimizer.param_groups]
         print(" > Current LR(s) -- {}".format(lrs))
         if np.max(lr) < last_lr and last_lr > 0:
@@ -256,14 +273,16 @@ def main():
             sys.exit(1)
 
         if args.similarity:
+            train_loader.sampler.set_epoch(epoch)
             train_loss, train_top1, class_loss, false_pos_train, false_neg_train = train_similarity(args, 
-            train_loader, model, sim_discriminator, loss_class, optimizer, epoch)
+            train_loader, model, sim_discriminator, loss_class, optimizer, epoch, device)
         
         # evaluate on validation set
         if epoch % args.log_freq == 0:
             print("Evaluating on epoch", epoch)
             if args.similarity:
-                val_loss, val_top1, false_pos, false_neg = validate_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch)
+                val_loader.sampler.set_epoch(epoch)
+                val_loss, val_top1, false_pos, false_neg = validate_similarity(args, val_loader, model, sim_discriminator, loss_class, epoch, device)
                 
             # set learning rate
             lr_decayer.step(val_loss)
@@ -309,10 +328,13 @@ def main():
                 is_best = val_loss < best_loss
                 best_loss = min(val_loss, best_loss)
 
-                if args.similarity: # need to save sim discriminator
+                if args.similarity and rank == 0: # need to save sim discriminator
                     save_path = os.path.join(args.log_dir, 'model', str(epoch+1) + 'sim_discriminator.pth.tar')
                     torch.save(sim_discriminator.state_dict(), save_path)
+    
+    cleanup_ddp()
             
 
 if __name__ == '__main__':
+    # os.environ["TOKENIZERS_PARALLELISM"] = "false" # either do this or switch from fast tokenizer to regular tokenizer
     main()

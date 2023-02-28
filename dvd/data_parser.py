@@ -5,7 +5,7 @@ import numpy as np
 from collections import namedtuple
 from collections import defaultdict
 
-ListData = namedtuple('ListData', ['id', 'label', 'path'])
+ListData = namedtuple('ListData', ['id', 'label', 'label_specific', 'path'])
 
 
 class DatasetBase(object):
@@ -48,6 +48,7 @@ class DatasetBase(object):
                     json_reader = json.load(jsonfile)
                     for elem in json_reader:
                         label = self.clean_template(elem['template'])
+                        label_specific = self.clean_template(elem['label'])
                         if label not in self.classes_dict.keys(): # or label == 'Pushing something so that it slightly moves':
                             continue
                         if label not in self.classes:
@@ -60,14 +61,14 @@ class DatasetBase(object):
                         if not os.path.exists(fpath):
                             continue
 
-                        item = ListData(elem['id'], label, fpath)
+                        item = ListData(elem['id'], label, label_specific, fpath)
                         json_data.append(item)
                         self.num_occur[label] += 1
 
                         if self.sd_augment:
                             fpath_augmented = os.path.join(self.data_root, 'style_augmented', elem['id'] + '_augmented' + self.extension)
                             if os.path.exists(fpath_augmented):
-                                item = ListData(elem['id'], label, fpath_augmented)
+                                item = ListData(elem['id'], label, label_specific, fpath_augmented)
                                 json_data.append(item)
                                 self.num_occur[label] += 1
             
