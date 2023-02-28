@@ -280,6 +280,11 @@ def training_loop(rank, args):
     except:
         video_encoder = model
 
+    try:
+        video_encoder = model.module
+    except:
+        video_encoder = model
+
     for epoch in range(start_epoch, args.num_epochs):
         lrs = [params['lr'] for params in optimizer.param_groups]
         print(" > Current LR(s) -- {}".format(lrs))
