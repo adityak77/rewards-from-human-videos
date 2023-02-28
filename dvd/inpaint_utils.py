@@ -51,7 +51,7 @@ def get_robot_cfg():
     return cfg
 
 
-def get_segmentation_model(cfg, rank):
+def get_segmentation_model(cfg, rank=None):
     if rank is not None:
         cfg.MODEL.DEVICE = f'cuda:{rank}'
     predictor = DefaultPredictor(cfg)

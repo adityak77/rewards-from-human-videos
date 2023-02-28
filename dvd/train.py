@@ -10,7 +10,8 @@ import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from utils import load_args, setup_cuda_devices, setup_ddp, cleanup_ddp
+from utils import (load_args, remove_module_from_checkpoint_state_dict, 
+                   setup_cuda_devices, save_checkpoint, setup_ddp, cleanup_ddp)
 from callbacks import (PlotLearning, AverageMeter)
 from multi_column import MultiColumn, SimilarityDiscriminator
 import torchvision
@@ -67,6 +68,8 @@ def main():
         save_dir += '_lang_template'
     if args.lang_label:
         save_dir += '_lang_label'
+    if args.lang_align:
+        save_dir += '_lang_align'
     
     print(" > Output folder for this run -- {}".format(save_dir))
     if not os.path.exists(save_dir):
@@ -105,24 +108,18 @@ def training_loop(rank, args):
         if os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path)
             if args.pretrained:
-                def remove_module_from_checkpoint_state_dict(state_dict):
-                    """
-                    Removes the prefix `module` from weight names that gets added by
-                    torch.nn.DataParallel()
-                    """
-                    from collections import OrderedDict
-                    new_state_dict = OrderedDict()
-                    for k, v in state_dict.items():
-                        name = k[7:]  # remove `module.`
-                        new_state_dict[name] = v
-                    return new_state_dict
-
                 print("Loading in pretrained model")
                 checkpoint['state_dict'] = remove_module_from_checkpoint_state_dict(
                                           checkpoint['state_dict'])
+                model.load_state_dict(checkpoint['state_dict'], strict=False)
+            elif args.resume:
+                print("Loading in model from resume")
+                checkpoint['encoder_state_dict'] = remove_module_from_checkpoint_state_dict(
+                                                checkpoint['encoder_state_dict'])
+                model.load_state_dict(checkpoint['encoder_state_dict'])
+                best_loss = checkpoint['best_loss']
+
             start_epoch = checkpoint['epoch']
-            best_loss = checkpoint['best_loss']
-            model.load_state_dict(checkpoint['state_dict'], strict=False)
             print(" > Loaded checkpoint '{}' (epoch {})"
                   .format(checkpoint_path, checkpoint['epoch']))
         else:
@@ -134,11 +131,12 @@ def training_loop(rank, args):
         
     if args.similarity:
         sim_discriminator = SimilarityDiscriminator(args).to(device)
-        if args.sim_resume:
-            resume_path = os.path.join(args.log_dir, 'model', str(args.sim_resume) + 'sim_discriminator.pth.tar')
-            sim_discriminator.load_state_dict(torch.load(resume_path), strict=True)
+        if args.resume:
+            sim_discriminator.load_state_dict(
+                remove_module_from_checkpoint_state_dict(checkpoint['sim_discriminator_state_dict'])
+            )
         sim_discriminator = DDP(sim_discriminator, device_ids=[rank])
-    if args.pretrained:
+    if args.pretrained and not args.lang_align:
         for p in model.parameters():
             p.requires_grad = False
             
@@ -240,30 +238,40 @@ def training_loop(rank, args):
     if args.similarity:
         params += list(sim_discriminator.parameters())
         print("Number of discriminator params", sum(p.numel() for p in sim_discriminator.parameters() if p.requires_grad))
+
         optimizer = torch.optim.SGD(params, lr,
                                  momentum=0.9,
                                  weight_decay=0.00001)
+        
+        if args.resume:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     # set callbacks
     plotter = PlotLearning(args, os.path.join(
         args.log_dir, "plots"), args.num_tasks)
     lr_decayer = torch.optim.lr_scheduler.ReduceLROnPlateau(
                         optimizer, 'min', factor=0.5, patience=5, verbose=True)
+    if args.resume:
+        lr_decayer.load_state_dict(checkpoint['lr_decayer_state_dict'])
+        plotter = checkpoint['plotter']
     val_loss = float('Inf')
 
     print(" > Training is getting started...")
     print(" > Training takes {} epochs.".format(args.num_epochs))
-    start_epoch = args.sim_resume if args.sim_resume > 0 else 0
+    start_epoch = args.resume + 1 if args.resume > 0 else 0
     
-    report_losses = {}
-    report_losses['train_acc'] = []
-    report_losses['val_acc'] = []
-    report_losses['val_loss'] = []
-    report_losses['train_loss'] = []
-    report_losses['false_pos'] = []
-    report_losses['false_neg'] = []
-    report_losses['false_pos_train'] = []
-    report_losses['false_neg_train'] = []
+    if args.resume:
+        report_losses = checkpoint['report_losses']
+    else:
+        report_losses = {}
+        report_losses['train_acc'] = []
+        report_losses['val_acc'] = []
+        report_losses['val_loss'] = []
+        report_losses['train_loss'] = []
+        report_losses['false_pos'] = []
+        report_losses['false_neg'] = []
+        report_losses['false_pos_train'] = []
+        report_losses['false_neg_train'] = []
 
     for epoch in range(start_epoch, args.num_epochs):
         lrs = [params['lr'] for params in optimizer.param_groups]
@@ -325,16 +333,25 @@ def training_loop(rank, args):
             # remember best loss and save the checkpoint
             freq = 10 if args.similarity else 5
             if (epoch + 1) % freq == 0:
-                is_best = val_loss < best_loss
-                best_loss = min(val_loss, best_loss)
+                if args.similarity and rank == 0:
+                    is_best = val_loss < best_loss
+                    best_loss = min(val_loss, best_loss)
 
-                if args.similarity and rank == 0: # need to save sim discriminator
-                    save_path = os.path.join(args.log_dir, 'model', str(epoch+1) + 'sim_discriminator.pth.tar')
-                    torch.save(sim_discriminator.state_dict(), save_path)
+                    save_state = {
+                        'epoch': epoch + 1,
+                        'best_loss': best_loss,
+                        'encoder_state_dict': model.state_dict(),
+                        'sim_discriminator_state_dict': sim_discriminator.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'lr_decayer_state_dict': lr_decayer.state_dict(),
+                        'report_losses': report_losses,
+                        'plotter': plotter,
+                    }
+                    save_dir = os.path.join(args.log_dir, 'model')
+                    save_checkpoint(save_state, is_best, save_dir, str(epoch+1) + 'checkpoint.pth.tar')
     
     cleanup_ddp()
             
 
 if __name__ == '__main__':
-    # os.environ["TOKENIZERS_PARALLELISM"] = "false" # either do this or switch from fast tokenizer to regular tokenizer
     main()

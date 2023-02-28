@@ -125,6 +125,7 @@ def get_cem_args_conf():
     parser.add_argument("--demo_path", type=str, default=None, help='path to demo video')
 
     # dvd model params
+    parser.add_argument("--video_checkpoint", type=str, default='pretrained/video_encoder/model_best.pth.tar', help='path to model')
     parser.add_argument("--checkpoint", type=str, default='test/tasks6_seed0_lr0.01_sim_pre_hum54144469394_dem60_rob54193/model/150sim_discriminator.pth.tar', help='path to model')
     parser.add_argument('--similarity', action='store_true', default=True, help='whether to use similarity discriminator') # needs to be true for MultiColumn init
     parser.add_argument('--hidden_size', type=int, default=512, help='latent encoding size')
@@ -192,7 +193,15 @@ def decode_gif(video_path):
 def load_discriminator_model(args):
     print("Loading in discriminator model")
     sim_discriminator = SimilarityDiscriminator(args)
-    sim_discriminator.load_state_dict(torch.load(args.checkpoint), strict=True)
+
+    model_checkpoint = torch.load(args.checkpoint)
+    if 'sim_discriminator_state_dict' in model_checkpoint:
+        model_checkpoint = model_checkpoint['sim_discriminator_state_dict']
+    
+    try:
+        sim_discriminator.load_state_dict(model_checkpoint, strict=True)
+    except:
+        sim_discriminator.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint), strict=True)
 
     return sim_discriminator.to(device)
 
@@ -200,8 +209,14 @@ def load_encoder_model(args):
     print("Loading in pretrained model")
     cnn_def = importlib.import_module("{}".format('model3D_1'))
     model = MultiColumn(args, args.num_tasks, cnn_def.Model, int(args.hidden_size))
-    model_checkpoint = os.path.join('pretrained/video_encoder/', 'model_best.pth.tar')
-    model.load_state_dict(remove_module_from_checkpoint_state_dict(torch.load(model_checkpoint)['state_dict']), strict=False)
+    model_checkpoint = torch.load(args.video_checkpoint)
+
+    if 'encoder_state_dict' in model_checkpoint:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint['encoder_state_dict']), strict=False)
+    elif 'state_dict' in model_checkpoint:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint['state_dict']), strict=False)
+    else:
+        model.load_state_dict(remove_module_from_checkpoint_state_dict(model_checkpoint), strict=False)
 
     return model.to(device)
 
@@ -231,7 +246,18 @@ def dvd_reward(states, **kwargs):
     
     rewards_demo = torch.zeros(states.shape[0])
     states = (states * 255).astype(np.uint8)
-    states_feats = dvd_process_encode_batch(states, video_encoder)
+
+    CHUNK_SIZE = 50
+    batch_num = 0
+    states_feats_list = []
+    while batch_num*CHUNK_SIZE < states.shape[0]:
+        loc = slice(batch_num*CHUNK_SIZE, min((batch_num+1)*CHUNK_SIZE, states.shape[0]))
+        feat = dvd_process_encode_batch(states[loc], video_encoder)
+        states_feats_list.append(feat)
+        # torch.cuda.empty_cache()
+        batch_num += 1
+
+    states_feats = torch.cat(states_feats_list, dim=0)
     
     sim_discriminator.eval()
     for demo_feat in demo_feats:
@@ -559,20 +585,44 @@ def cem_iteration_logging(args,
                           very_start, 
                           sample_rewards,
                           calculate_add_reward=False,
+                          inpainted_rewards=False,
                           **kwargs
     ):
     additional_reward_type = 'vip' if args.vip else 'dvd'
     additional_reward = 0
+    all_obs_inpainted = None
     if calculate_add_reward:
         terminal_reward_fn = kwargs['terminal_reward_fn']
+        reward_states = states # states to be used for reward, either inpainted or not
+        if inpainted_rewards:
+            # Inpaint states here
+            from inpaint_utils import get_segmentation_model, inpaint
+            robot_cfg = kwargs['robot_cfg']
+            robot_segmentation_model = get_segmentation_model(robot_cfg)
+            inpaint_model = kwargs['inpaint_model']
+            inpaint_states = (states * 255).astype(np.uint8)
+
+            if not args.no_robot_inpaint:
+                # detectron2 input is BGR
+                for j in range(len(inpaint_states[0])):
+                    inpaint_states[0][j] = cv2.cvtColor(inpaint_states[0][j], cv2.COLOR_RGB2BGR)
+
+                inpaint_states = np.array([inpaint(args, inpaint_model, robot_segmentation_model, inpaint_states[0])])
+
+                # convert back to RGB
+                for j in range(len(inpaint_states[0])):
+                    inpaint_states[0][j] = cv2.cvtColor(inpaint_states[0][j], cv2.COLOR_BGR2RGB)
+            reward_states = inpaint_states
+            all_obs_inpainted = inpaint_states[0] # (inpaint_states[0] * 255).astype(np.uint8)
+            
         if args.dvd:
             video_encoder = kwargs['video_encoder']
             sim_discriminator = kwargs['sim_discriminator']
             demo_feats = kwargs['demo_feats']
-            additional_reward = terminal_reward_fn(states, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
+            additional_reward = terminal_reward_fn(reward_states, demo_feats=demo_feats, video_encoder=video_encoder, sim_discriminator=sim_discriminator).item()
         elif args.vip:
             demos = kwargs['demos']
-            additional_reward = terminal_reward_fn(states, demos=demos).item()
+            additional_reward = terminal_reward_fn(reward_states, demos=demos).item()
     
     # calculate success and reward of trajectory
     any_timestep_succ = False
@@ -589,7 +639,7 @@ def cem_iteration_logging(args,
 
     # logging results
     all_obs = (states[0] * 255).astype(np.uint8)
-    cem_logger.save_graphs(all_obs)
+    cem_logger.save_graphs(all_obs, all_obs_inpainted)
 
     res_dict = {
         'total_iterations': cem_logger.total_iterations,
