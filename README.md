@@ -150,35 +150,6 @@ python cem_plan_inpaint_egohos.py --task_id 5 --dvd --demo_path demos/task5 --ch
 
 
 
-
-## WIP
-
-In order to run inference using DVD, we need to use Stochastic Variational Video Predictor (SV2P) from `tensor2tensor`. In order to do this, you need to register the problem `dvd/human_problem.py` first. To do this, run something like 
-
-```
-DATA_DIR = data_dir
-OUTPUT = sv2p_output
-
-cd dvd
-
-tensor2tensor/tensor2tensor/bin/t2t-trainer --t2t_usr_dir=human_updated \
---schedule=train --alsologtostderr --generate_data --tmp_dir "tmp/" --data_dir=$DATA_DIR --output_dir=$OUTPUT \
---problem=human_updated --model=next_frame_sv2p --hparams_set=next_frame_sv2p --train_steps=200000 --eval_steps=100 \
---hparams="video_num_input_frames=1, video_num_target_frames=15, batch_size=2"
-```
-
-This command currently does not work. There are many version issues that require changes in either TF 2.0 or TF 1.0. Once this is resolved, we should be able to run
-
-```
-cd dvd
-python sv2p_plan.py --num_epochs 100 --num_tasks 6 --task_num 94 --seed 0 --sample_sz 100 --similarity 1 \
---num_demos 3 --model_dir pretrained/dvd_human_tasks_6_robot_tasks_3.pth.tar --xml env1 --cem_iters 0 --root ./ \
---sv2p_root path/to/tensor2tensor/
-```
-
-
-
-
 ## Troubleshooting
 
 For training, make sure the following versions of `protobuf` and `pillow` are installed.
