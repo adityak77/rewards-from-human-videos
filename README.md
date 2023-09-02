@@ -4,7 +4,7 @@ Reproducing DVD with current versions of Metaworld, Mujoco-Py, and TensorFlow 2.
 
 ## Setup for DVD reproduction
 
-- Download Something Something from [here](https://developer.qualcomm.com/software/ai-datasets/something-something). (LEAP Lab only) can access this in `rome` or `paris` and `rsync` to other machines as necessary.
+- Download Something Something from [here](https://developer.qualcomm.com/software/ai-datasets/something-something).
 
 - Install Mujoco 2.0 and mujoco-py. Instructions for this are [here](https://github.com/openai/mujoco-py#install-mujoco).
 
