@@ -1,6 +1,6 @@
-# rewards-from-human-videos
+# Rewards from Human Videos
 
-Reproducing DVD with current versions of Metaworld, Mujoco-Py, and TensorFlow 2.0.
+Learn agent- and domain-agnostic reward functions from human videos that can be adapted to various robots and environments.
 
 ## Setup for DVD reproduction
 
